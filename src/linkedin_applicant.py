@@ -107,9 +107,18 @@ class LinkedInApplicant:
             safe_role = sanitize_filename(role)
             output_dir = Path("output") / "applications" / f"{safe_company}_{safe_role}_{date_str}"
 
-            logger.info(f"Navigating to job: {role} at {company}")
-            self.page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(random.uniform(2, 5))
+            # Convert search URLs to direct job view URLs for reliable navigation
+            import re
+            job_id_match = re.search(r'currentJobId=(\d+)', job_url) or re.search(r'/jobs/view/(\d+)', job_url)
+            if job_id_match:
+                direct_url = f"https://www.linkedin.com/jobs/view/{job_id_match.group(1)}/"
+                logger.info(f"Navigating to direct job URL: {direct_url}")
+            else:
+                direct_url = job_url
+                logger.info(f"Navigating to job URL: {direct_url}")
+            
+            self.page.goto(direct_url, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(random.uniform(3, 6))
 
             # Check for CAPTCHA — only VISIBLE challenges, not background reCAPTCHA iframes
             captcha_present = False
@@ -133,13 +142,28 @@ class LinkedInApplicant:
 
             self._take_screenshot(self.page, job, output_dir, "job_page")
 
-            # Check for Easy Apply button
-            easy_apply_btn = self.page.locator(
-                'button:has-text("Easy Apply"), button[aria-label*="Easy Apply"]'
-            ).first
-            try:
-                easy_apply_btn.wait_for(state="visible", timeout=5000)
-            except Exception:
+            # Check for Easy Apply / Apply button — LinkedIn uses <a>, <button>, or <div>
+            easy_apply_btn = None
+            for ea_selector in [
+                'a[aria-label*="Easy Apply"]',
+                'a:has-text("Easy Apply")',
+                'button[aria-label*="Easy Apply"]',
+                'button.jobs-apply-button',
+                'button:has-text("Easy Apply")',
+                'a[aria-label*="Apply to this job"]',
+                'a:has-text("Apply")',
+                'button:has-text("Apply")',
+            ]:
+                try:
+                    loc = self.page.locator(ea_selector).first
+                    if loc.is_visible(timeout=2000):
+                        easy_apply_btn = loc
+                        logger.info(f"Found Easy Apply with selector: {ea_selector}")
+                        break
+                except Exception:
+                    continue
+            
+            if not easy_apply_btn:
                 logger.info(f"No Easy Apply button for {role} at {company}")
                 return {
                     "success": False,
@@ -297,9 +321,13 @@ class LinkedInApplicant:
             next_btn = page.locator(
                 'button[data-easy-apply-next-button], '
                 'button[aria-label*="Continue to next step"], '
+                'footer button.artdeco-button--primary, '
+                '.jobs-easy-apply-modal button.artdeco-button--primary, '
+                '[role="dialog"] footer button.artdeco-button--primary, '
                 'button:has-text("Next"), '
                 'button:has-text("Review"), '
-                'button:has-text("Continue")'
+                'button:has-text("Continue"), '
+                'button:has-text("Submit application")'
             ).first
             if next_btn.is_visible(timeout=3000):
                 time.sleep(random.uniform(1, 3))
