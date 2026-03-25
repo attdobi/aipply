@@ -111,19 +111,18 @@ class LinkedInApplicant:
             self.page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
             time.sleep(random.uniform(2, 5))
 
-            # Check for CAPTCHA — ONLY real CAPTCHA indicators
+            # Check for CAPTCHA — only VISIBLE challenges, not background reCAPTCHA iframes
             captcha_present = False
             try:
-                captcha_locator = self.page.locator(
-                    '#captcha-internal, iframe[src*="captcha"]'
-                )
-                if captcha_locator.count() > 0:
+                # Only #captcha-internal is a real blocking CAPTCHA on LinkedIn
+                captcha_locator = self.page.locator('#captcha-internal')
+                if captcha_locator.count() > 0 and captcha_locator.first.is_visible():
                     captcha_present = True
             except Exception:
                 pass
 
             if captcha_present:
-                logger.warning(f"CAPTCHA detected for {role} at {company}")
+                logger.warning(f"Visible CAPTCHA challenge detected for {role} at {company}")
                 self._take_screenshot(self.page, job, output_dir, "captcha_detected")
                 return {
                     "success": False,
