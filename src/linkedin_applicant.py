@@ -816,7 +816,7 @@ class LinkedInApplicant:
                         logger.debug(f"Filled 'San Francisco, CA' for: '{label_text[:40]}'")
                     # LinkedIn URL
                     elif "linkedin" in label_text:
-                        inp.fill(self.candidate.get("linkedin_url", "https://www.linkedin.com/in/dannadobi"))
+                        inp.fill(self.candidate.get("linkedin_url", "https://www.linkedin.com/in/danna-dobi/"))
                         logger.debug(f"Filled LinkedIn URL for: '{label_text[:40]}'")
                     # GPA
                     elif "gpa" in label_text:

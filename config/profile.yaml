@@ -4,7 +4,7 @@ candidate:
   name: "Danna Dobi"
   email: "danna.dobi@gmail.com"
   phone: "510-333-8812"
-  linkedin_url: "https://www.linkedin.com/in/dannadobi"
+  linkedin_url: "https://www.linkedin.com/in/danna-dobi/"
   location: "San Francisco Bay Area"
 
   summary: |
@@ -24,3 +24,16 @@ candidate:
     - Compliance Officer
     - Governance Analyst
     - Senior Compliance Analyst
+
+  # EEO / Work Authorization
+  gender: "Female"
+  race_ethnicity: "Hispanic or Latino"
+  veteran_status: "No"
+  disability_status: "No"
+  sponsorship_needed: "No"
+  work_authorization: "Yes"
+  citizenship: "US Citizen"
+  willing_to_relocate: true
+  willing_to_work_in_office: true
+  years_of_experience: 9
+  salary_expectation: "130000"
