@@ -5,6 +5,7 @@ Tracks job applications, stores data in JSON, and generates HTML/XLSX reports.
 """
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -48,6 +49,9 @@ class ApplicationTracker:
         screenshots: list = None,
     ) -> dict:
         """Record a new job application."""
+        # Normalize position: collapse newlines/whitespace into single spaces
+        position = " ".join(position.strip().split())
+
         # Convert all paths to absolute for file:// links
         if resume_path:
             resume_path = str(Path(resume_path).resolve())
@@ -95,14 +99,30 @@ class ApplicationTracker:
         return self.applications
 
     def is_already_applied(self, job_url: str = "", company: str = "", position: str = "") -> bool:
-        """Check if we've already applied to this job (by URL or company+position)."""
+        """Check if we've already applied (by URL, job ID, or normalized company+position)."""
+
+        def norm(s: str) -> str:
+            """Normalize: strip, collapse whitespace, lowercase."""
+            return " ".join(s.lower().strip().split())
+
         for a in self.applications:
+            # Exact URL match
             if job_url and a.get("job_url") == job_url:
                 return True
-            if company and position:
-                if (a.get("company", "").lower().strip() == company.lower().strip() and
-                    a.get("position", "").lower().strip() == position.lower().strip()):
+
+            # Match by job ID extracted from URL (handles query-param differences)
+            if job_url:
+                new_id = re.search(r'/jobs/view/(\d+)', job_url)
+                old_id = re.search(r'/jobs/view/(\d+)', a.get("job_url", ""))
+                if new_id and old_id and new_id.group(1) == old_id.group(1):
                     return True
+
+            # Normalized company+position match (handles newlines, extra spaces)
+            if company and position:
+                if (norm(a.get("company", "")) == norm(company) and
+                        norm(a.get("position", "")) == norm(position)):
+                    return True
+
         return False
 
     def get_stats(self) -> dict:

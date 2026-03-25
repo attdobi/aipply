@@ -231,10 +231,73 @@ class LinkedInApplicant:
             self._handle_share_profile_dialog(self.page)
 
             # Multi-step form handling loop
-            max_steps = 8
+            max_steps = 15
+            prev_page_text = ""
+            stuck_count = 0
+
             for step in range(max_steps):
                 time.sleep(random.uniform(2, 4))
                 self._take_screenshot(self.page, job, output_dir, f"step_{step}")
+
+                # Check for submission confirmation (dialog may have closed)
+                try:
+                    page_text = self.page.evaluate("() => document.body.innerText").lower()
+                    if "application was sent" in page_text or "application submitted" in page_text:
+                        self._take_screenshot(self.page, job, output_dir, "confirmed_submit")
+                        logger.info(f"Application confirmed submitted for {role} at {company}")
+                        return {
+                            "success": True,
+                            "status": "applied",
+                            "reason": "easy_apply_confirmed",
+                            "screenshots": list(self.screenshots),
+                        }
+                except Exception:
+                    pass
+
+                # Check if dialog was dismissed (application might have been submitted or closed)
+                try:
+                    dialog = self.page.locator('div[role="dialog"], .artdeco-modal')
+                    if dialog.count() == 0:
+                        # Dialog gone — check for confirmation text
+                        body_text = self.page.evaluate("() => document.body.innerText").lower()
+                        if "application was sent" in body_text or "application submitted" in body_text:
+                            self._take_screenshot(self.page, job, output_dir, "dialog_closed_confirmed")
+                            logger.info(f"Dialog closed with confirmation for {role} at {company}")
+                            return {
+                                "success": True,
+                                "status": "applied",
+                                "reason": "easy_apply_dialog_closed_confirmed",
+                                "screenshots": list(self.screenshots),
+                            }
+                        else:
+                            logger.warning(f"Dialog dismissed without confirmation for {role} at {company}")
+                            return {
+                                "success": False,
+                                "status": "apply_failed",
+                                "reason": "dialog_dismissed_without_confirmation",
+                                "screenshots": list(self.screenshots),
+                            }
+                except Exception:
+                    pass
+
+                # Detect stuck step (same dialog content for 2+ iterations)
+                try:
+                    current_text = self.page.evaluate(
+                        "() => document.querySelector('[role=\"dialog\"]')?.innerText || ''"
+                    )
+                    if current_text and current_text == prev_page_text:
+                        stuck_count += 1
+                        if stuck_count >= 2:
+                            logger.warning(
+                                f"Stuck on same step for {stuck_count} iterations, giving up on {role} at {company}"
+                            )
+                            self._take_screenshot(self.page, job, output_dir, "stuck_step")
+                            break
+                    else:
+                        stuck_count = 0
+                    prev_page_text = current_text
+                except Exception:
+                    pass
 
                 # Check if we have a Submit button
                 if self._has_submit_button(self.page):
@@ -252,7 +315,7 @@ class LinkedInApplicant:
 
                 # Fill form fields for this step
                 self._fill_contact_info(self.page)
-                self._upload_resume(self.page, resume_path)
+                self._handle_resume_step(self.page, resume_path)
                 self._answer_common_questions(self.page)
                 self._click_next_or_continue(self.page)
 
@@ -364,6 +427,9 @@ class LinkedInApplicant:
     def _click_next_or_continue(self, page: Page):
         """Click Next, Continue, or Review button to advance the form.
 
+        NOTE: Does NOT include "Submit application" — that is handled
+        exclusively by _click_submit() to avoid race conditions.
+
         Args:
             page: Playwright Page instance.
         """
@@ -376,8 +442,7 @@ class LinkedInApplicant:
                 '[role="dialog"] footer button.artdeco-button--primary, '
                 'button:has-text("Next"), '
                 'button:has-text("Review"), '
-                'button:has-text("Continue"), '
-                'button:has-text("Submit application")'
+                'button:has-text("Continue")'
             ).first
             if next_btn.is_visible(timeout=3000):
                 time.sleep(random.uniform(1, 3))
@@ -469,106 +534,171 @@ class LinkedInApplicant:
         except Exception as e:
             logger.debug(f"Phone input handling: {e}")
 
-    def _upload_resume(self, page: Page, resume_path):
-        """Find file input inside the modal and upload the resume.
+    def _handle_resume_step(self, page: Page, resume_path):
+        """Handle the resume step — upload if needed, skip if already present.
+
+        Wrapper that checks for the resume upload area and delegates
+        to _upload_resume for the actual upload.
 
         Args:
             page: Playwright Page instance.
             resume_path: Path to the resume file to upload.
         """
+        self._upload_resume(page, resume_path)
+
+    def _upload_resume(self, page: Page, resume_path):
+        """Handle resume upload step — handles multiple LinkedIn patterns.
+
+        Pattern 1: Direct file input visible in the modal.
+        Pattern 2: "Upload resume" button that reveals a file input.
+        Pattern 3: Resume already uploaded (filename visible in upload area).
+
+        Args:
+            page: Playwright Page instance.
+            resume_path: Path to the resume file to upload.
+
+        Returns:
+            True if resume was uploaded or already present, False otherwise.
+        """
         try:
             modal = page.locator('div[role="dialog"], .artdeco-modal').first
-            file_input = modal.locator('input[type="file"]').first
+
+            # Pattern 1: Direct file input
+            file_input = modal.locator('input[type="file"]')
             if file_input.count() > 0:
                 time.sleep(random.uniform(1, 2))
-                file_input.set_input_files(str(resume_path))
-                logger.debug(f"Uploaded resume: {resume_path}")
+                file_input.first.set_input_files(str(resume_path))
                 time.sleep(random.uniform(2, 4))
+                logger.debug(f"Uploaded resume via file input: {resume_path}")
+                return True
+
+            # Pattern 2: "Upload resume" button that reveals file input
+            upload_btn = modal.locator(
+                'button:has-text("Upload resume"), '
+                'button:has-text("Upload"), '
+                'label:has-text("Upload")'
+            )
+            if upload_btn.count() > 0 and upload_btn.first.is_visible():
+                upload_btn.first.click()
+                time.sleep(1)
+                file_input = modal.locator('input[type="file"]')
+                if file_input.count() > 0:
+                    file_input.first.set_input_files(str(resume_path))
+                    time.sleep(random.uniform(2, 4))
+                    logger.debug(f"Uploaded resume via upload button: {resume_path}")
+                    return True
+
+            # Pattern 3: Resume already uploaded (check for resume filename text)
+            resume_area = modal.locator(
+                '.jobs-document-upload, [class*="document-upload"]'
+            )
+            if resume_area.count() > 0:
+                area_text = resume_area.first.text_content() or ""
+                if any(ext in area_text.lower() for ext in [".docx", ".pdf", "resume"]):
+                    logger.debug("Resume appears to be already uploaded")
+                    return True
+
         except Exception as e:
-            logger.debug(f"Resume upload skipped or failed: {e}")
+            logger.debug(f"Resume upload: {e}")
+        return False
 
     def _answer_common_questions(self, page: Page):
         """Handle common Easy Apply questions with predefined answers.
 
-        Handles radio buttons, select dropdowns, and text/number inputs
-        for common questions like work authorization, sponsorship, etc.
+        Comprehensive handler for radio buttons, select dropdowns,
+        text/number inputs, and textareas — covering work authorization,
+        sponsorship, experience, salary, location, EEO, and more.
+
+        Ported from cycle_20260325_0732.py for full coverage.
 
         Args:
             page: Playwright Page instance.
         """
-        # Pattern → answer mapping
-        question_answers = {
-            "authorized to work": "Yes",
-            "work authorization": "Yes",
-            "legally authorized": "Yes",
-            "require sponsorship": "No",
-            "sponsorship": "No",
-            "visa sponsorship": "No",
-            "years of experience": "9",
-            "experience do you have": "9",
-        }
+        self._answer_radio_questions(page)
+        self._answer_text_inputs(page)
+        self._answer_select_dropdowns(page)
+        self._answer_textareas(page)
 
-        # Handle radio buttons (fieldset/legend based)
+    def _answer_radio_questions(self, page: Page):
+        """Handle radio button questions (fieldset/legend based).
+
+        Covers: work authorization, sponsorship, commute/relocate,
+        background check, and EEO questions (gender/race/veteran/disability).
+        """
         try:
             fieldsets = page.locator("fieldset").all()
             for fieldset in fieldsets:
                 try:
-                    legend = fieldset.locator("legend, span.visually-hidden, span[aria-hidden='true']").first
-                    legend_text = (legend.text_content() or "").lower().strip()
+                    legend = fieldset.locator("legend")
+                    legend_text = (legend.text_content() or "").lower().strip() if legend.count() > 0 else ""
                     if not legend_text:
-                        # Try getting all text from the fieldset label area
-                        legend_text = (fieldset.locator("legend").text_content() or "").lower().strip()
+                        # Try span inside the fieldset for visually-hidden legends
+                        span = fieldset.locator("legend span, span.visually-hidden").first
+                        legend_text = (span.text_content() or "").lower().strip() if span.count() > 0 else ""
                     if not legend_text:
                         continue
 
-                    for pattern, answer in question_answers.items():
-                        if pattern in legend_text:
-                            # Find the matching radio option
-                            radio_labels = fieldset.locator("label").all()
-                            for radio_label in radio_labels:
-                                label_text = (radio_label.text_content() or "").strip()
-                                if label_text.lower() == answer.lower():
-                                    radio_input = radio_label.locator("input[type='radio']")
-                                    if radio_input.count() > 0 and not radio_input.is_checked():
-                                        time.sleep(random.uniform(1, 2))
-                                        radio_label.click()
-                                        logger.debug(f"Selected radio '{label_text}' for '{pattern}'")
-                                    break
-                            break
+                    # Work authorization / legally authorized / eligible
+                    if any(kw in legend_text for kw in ["authorized", "legally", "eligible"]):
+                        yes_label = fieldset.locator("label:has-text('Yes')").first
+                        if yes_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            yes_label.click()
+                            logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
+
+                    # Sponsorship
+                    elif any(kw in legend_text for kw in ["sponsorship", "sponsor"]):
+                        no_label = fieldset.locator("label:has-text('No')").first
+                        if no_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            no_label.click()
+                            logger.debug(f"Radio: No for '{legend_text[:40]}'")
+
+                    # Commute / relocate
+                    elif any(kw in legend_text for kw in ["commute", "relocat"]):
+                        yes_label = fieldset.locator("label:has-text('Yes')").first
+                        if yes_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            yes_label.click()
+                            logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
+
+                    # Background check / drug test
+                    elif any(kw in legend_text for kw in ["background check", "drug"]):
+                        yes_label = fieldset.locator("label:has-text('Yes')").first
+                        if yes_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            yes_label.click()
+                            logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
+
+                    # EEO questions — decline to self-identify
+                    elif any(kw in legend_text for kw in [
+                        "gender", "race", "veteran", "disability", "ethnicity",
+                    ]):
+                        decline = fieldset.locator(
+                            "label:has-text('Decline'), "
+                            "label:has-text('decline'), "
+                            "label:has-text('prefer not')"
+                        ).first
+                        if decline.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            decline.click()
+                            logger.debug(f"Radio: Decline for EEO '{legend_text[:40]}'")
+
                 except Exception:
                     continue
         except Exception:
             pass
 
-        # Handle select dropdowns
-        try:
-            selects = page.locator("select").all()
-            for select_el in selects:
-                try:
-                    label_text = self._get_field_label(page, select_el)
-                    if not label_text:
-                        continue
+    def _answer_text_inputs(self, page: Page):
+        """Handle text and number input questions.
 
-                    for pattern, answer in question_answers.items():
-                        if pattern in label_text:
-                            options = select_el.locator("option").all()
-                            for opt in options:
-                                opt_text = (opt.text_content() or "").strip()
-                                if opt_text.lower() == answer.lower():
-                                    time.sleep(random.uniform(1, 2))
-                                    select_el.select_option(label=opt_text)
-                                    logger.debug(f"Selected '{opt_text}' for '{pattern}'")
-                                    break
-                            break
-                except Exception:
-                    continue
-        except Exception:
-            pass
-
-        # Handle text and number inputs
+        Covers: years of experience (domain-specific and generic), salary,
+        city/location, LinkedIn URL, GPA, zip/postal, and address.
+        """
         try:
             inputs = page.locator(
-                "input[type='text'], input[type='number'], input:not([type])"
+                'div[role="dialog"] input[type="text"], '
+                'div[role="dialog"] input[type="number"]'
             ).all()
             for inp in inputs:
                 try:
@@ -580,12 +710,169 @@ class LinkedInApplicant:
                     if current_val and current_val.strip():
                         continue  # Don't overwrite existing values
 
-                    for pattern, answer in question_answers.items():
-                        if pattern in label_text:
-                            time.sleep(random.uniform(1, 2))
-                            inp.fill(answer)
-                            logger.debug(f"Filled '{answer}' for '{pattern}'")
-                            break
+                    # Domain-specific experience years
+                    if "year" in label_text and any(
+                        w in label_text for w in [
+                            "experience", "compliance", "audit", "risk",
+                            "regulation", "banking", "financial", "aml",
+                            "bsa", "fraud", "governance", "examination",
+                        ]
+                    ):
+                        inp.fill("9")
+                        logger.debug(f"Filled '9' for domain experience: '{label_text[:40]}'")
+                    # Generic years
+                    elif "year" in label_text:
+                        inp.fill("7")
+                        logger.debug(f"Filled '7' for generic years: '{label_text[:40]}'")
+                    # Salary / compensation
+                    elif any(kw in label_text for kw in ["salary", "compensation", "pay", "desired"]):
+                        inp.fill("130000")
+                        logger.debug(f"Filled '130000' for salary: '{label_text[:40]}'")
+                    # City / location
+                    elif any(kw in label_text for kw in ["city", "location"]):
+                        inp.fill("San Francisco, CA")
+                        logger.debug(f"Filled 'San Francisco, CA' for: '{label_text[:40]}'")
+                    # LinkedIn URL
+                    elif "linkedin" in label_text:
+                        inp.fill("https://www.linkedin.com/in/dannadobi")
+                        logger.debug(f"Filled LinkedIn URL for: '{label_text[:40]}'")
+                    # GPA
+                    elif "gpa" in label_text:
+                        inp.fill("3.7")
+                        logger.debug(f"Filled '3.7' for GPA: '{label_text[:40]}'")
+                    # Zip / postal code
+                    elif any(kw in label_text for kw in ["zip", "postal"]):
+                        inp.fill("94102")
+                        logger.debug(f"Filled '94102' for zip: '{label_text[:40]}'")
+                    # Address
+                    elif "address" in label_text:
+                        inp.fill("San Francisco, CA")
+                        logger.debug(f"Filled address for: '{label_text[:40]}'")
+                    # Work authorization / sponsorship text inputs
+                    elif any(kw in label_text for kw in ["authorized", "legally"]):
+                        inp.fill("Yes")
+                        logger.debug(f"Filled 'Yes' for: '{label_text[:40]}'")
+                    elif "sponsorship" in label_text or "sponsor" in label_text:
+                        inp.fill("No")
+                        logger.debug(f"Filled 'No' for: '{label_text[:40]}'")
+
+                    time.sleep(random.uniform(0.5, 1.5))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _answer_select_dropdowns(self, page: Page):
+        """Handle select dropdown questions.
+
+        Covers: work authorization, sponsorship, education/degree level,
+        experience/proficiency level, and EEO questions.
+        """
+        try:
+            selects = page.locator('div[role="dialog"] select').all()
+            for select_el in selects:
+                try:
+                    label_text = self._get_field_label(page, select_el)
+                    if not label_text:
+                        continue
+
+                    current_val = select_el.input_value()
+                    if current_val and current_val.strip() and current_val != "Select an option":
+                        continue
+
+                    opts = select_el.locator("option").all()
+
+                    # Work authorization
+                    if any(kw in label_text for kw in ["authorized", "legal"]):
+                        for o in opts:
+                            if "yes" in (o.text_content() or "").lower():
+                                select_el.select_option(label=o.text_content().strip())
+                                logger.debug(f"Select: Yes for '{label_text[:40]}'")
+                                break
+
+                    # Sponsorship
+                    elif "sponsor" in label_text:
+                        for o in opts:
+                            if "no" in (o.text_content() or "").lower():
+                                select_el.select_option(label=o.text_content().strip())
+                                logger.debug(f"Select: No for '{label_text[:40]}'")
+                                break
+
+                    # Education / degree
+                    elif any(kw in label_text for kw in ["education", "degree"]):
+                        for o in opts:
+                            if "bachelor" in (o.text_content() or "").lower():
+                                select_el.select_option(label=o.text_content().strip())
+                                logger.debug(f"Select: Bachelor's for '{label_text[:40]}'")
+                                break
+
+                    # Experience / proficiency level
+                    elif any(kw in label_text for kw in ["experience", "proficiency"]):
+                        for o in opts:
+                            ot = (o.text_content() or "").lower()
+                            if "expert" in ot or "advanced" in ot:
+                                select_el.select_option(label=o.text_content().strip())
+                                logger.debug(f"Select: Advanced/Expert for '{label_text[:40]}'")
+                                break
+
+                    # EEO (gender/race/veteran/disability)
+                    elif any(kw in label_text for kw in [
+                        "gender", "race", "veteran", "disability",
+                    ]):
+                        for o in opts:
+                            ot = (o.text_content() or "").lower()
+                            if "decline" in ot or "prefer not" in ot:
+                                select_el.select_option(label=o.text_content().strip())
+                                logger.debug(f"Select: Decline for EEO '{label_text[:40]}'")
+                                break
+
+                    time.sleep(random.uniform(0.5, 1.5))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def _answer_textareas(self, page: Page):
+        """Handle textarea questions (cover letter, additional info).
+
+        Args:
+            page: Playwright Page instance.
+        """
+        try:
+            textareas = page.locator('div[role="dialog"] textarea').all()
+            for ta in textareas:
+                try:
+                    val = ta.input_value()
+                    if val and val.strip():
+                        continue
+
+                    label_text = ""
+                    ta_id = ta.get_attribute("id") or ""
+                    if ta_id:
+                        lbl = page.locator(f'label[for="{ta_id}"]')
+                        if lbl.count() > 0:
+                            label_text = (lbl.text_content() or "").lower()
+                    if not label_text:
+                        label_text = (ta.get_attribute("aria-label") or "").lower()
+
+                    # Cover letter or additional info — provide professional summary
+                    if any(kw in label_text for kw in ["cover letter", "additional", "summary", "about"]):
+                        ta.fill(
+                            "I bring 9+ years of compliance and regulatory experience, "
+                            "including federal bank examination at the OCC and hands-on roles "
+                            "in fintech and banking. I hold CFE and CAMS certifications."
+                        )
+                        logger.debug(f"Filled textarea for: '{label_text[:40]}'")
+                    elif label_text:
+                        # Generic professional answer for unknown textareas
+                        ta.fill(
+                            "I bring 9+ years of compliance and regulatory experience, "
+                            "including federal bank examination at the OCC and hands-on roles "
+                            "in fintech and banking."
+                        )
+                        logger.debug(f"Filled textarea (generic) for: '{label_text[:40]}'")
+
+                    time.sleep(random.uniform(0.5, 1.5))
                 except Exception:
                     continue
         except Exception:
