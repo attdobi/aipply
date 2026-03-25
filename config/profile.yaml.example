@@ -1,0 +1,38 @@
+# Aipply - Candidate Profile (EXAMPLE)
+# Copy this to profile.yaml and fill in your info
+# profile.yaml is gitignored — your personal data stays local
+
+candidate:
+  name: "Jane Doe"
+  first_name: "Jane"
+  last_name: "Doe"
+  email: "jane.doe@example.com"
+  phone: "555-123-4567"
+  linkedin_url: "https://www.linkedin.com/in/janedoe/"
+  location: "San Francisco Bay Area"
+  address: "123 Main St, City, ST 12345"
+  how_did_you_hear: "LinkedIn"
+
+  summary: |
+    Experienced professional in your field.
+
+  strengths:
+    - Skill 1
+    - Skill 2
+
+  target_roles:
+    - Role 1
+    - Role 2
+
+  # EEO / Work Authorization
+  gender: "Female"
+  race_ethnicity: "Hispanic or Latino"
+  veteran_status: "No"
+  disability_status: "No"
+  sponsorship_needed: "No"
+  work_authorization: "Yes"
+  citizenship: "US Citizen"
+  willing_to_relocate: true
+  willing_to_work_in_office: true
+  years_of_experience: 5
+  salary_expectation: "100000"

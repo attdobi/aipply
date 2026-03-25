@@ -28,6 +28,25 @@ class CoverLetterGenerator:
         """Generate tailored cover letter text."""
         from datetime import datetime
 
+        # Clean title: remove LinkedIn artifacts (doubled text, "with verification", etc.)
+        title = title.split("\n")[0].strip()
+        title = title.replace(" with verification", "")
+        # Strip trailing punctuation
+        title = title.rstrip(".,;:")
+        # De-duplicate if title is repeated (e.g. "Risk Analyst Risk Analyst")
+        words = title.split()
+        if len(words) >= 2 and len(words) % 2 == 0:
+            half = len(words) // 2
+            if [w.lower() for w in words[:half]] == [w.lower() for w in words[half:]]:
+                title = " ".join(words[:half])
+        # Clean up pipe/dash suffixes (e.g. "Risk Analyst | $100/hr Remote")
+        for sep in ["|", "—", " - $"]:
+            if sep in title:
+                title = title.split(sep)[0].strip()
+        # Remove redundant trailing "Position"/"Role"/"Job" (avoids "...Position position at")
+        import re
+        title = re.sub(r'\s+(position|role|job)\s*$', '', title, flags=re.IGNORECASE)
+
         desc_lower = description.lower()
 
         highlights = []
