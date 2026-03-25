@@ -20,15 +20,22 @@ POSITIVE_KEYWORDS = [
     "regulatory",
     "governance",
     "monitoring",
-    "analyst",
-    "specialist",
     "examiner",
     "investigator",
-    "testing",
     "quality control",
-    "operations",
-    "officer",
-    "coordinator",
+    # Compound terms — "analyst" alone is too broad (matches "Financial Analyst" etc.)
+    "compliance analyst",
+    "risk analyst",
+    "audit analyst",
+    "fraud analyst",
+    "regulatory analyst",
+    "operations analyst",
+    "compliance specialist",
+    "compliance officer",
+    "compliance coordinator",
+    "risk officer",
+    "compliance testing",
+    "controls testing",
 ]
 
 # Title must NOT contain any of these (case-insensitive)
