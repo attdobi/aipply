@@ -824,12 +824,16 @@ class LinkedInApplicant:
                         logger.debug(f"Filled '3.7' for GPA: '{label_text[:40]}'")
                     # Zip / postal code
                     elif any(kw in label_text for kw in ["zip", "postal"]):
-                        inp.fill("94102")
-                        logger.debug(f"Filled '94102' for zip: '{label_text[:40]}'")
+                        inp.fill("94502")
+                        logger.debug(f"Filled '94502' for zip: '{label_text[:40]}'")
                     # Address
-                    elif "address" in label_text:
-                        inp.fill("San Francisco, CA")
+                    elif "address" in label_text or "street" in label_text:
+                        inp.fill(self.candidate.get("address", "San Francisco, CA"))
                         logger.debug(f"Filled address for: '{label_text[:40]}'")
+                    # How did you hear about this job
+                    elif any(kw in label_text for kw in ["how did you hear", "how did you find", "referral source", "where did you hear"]):
+                        inp.fill(self.candidate.get("how_did_you_hear", "LinkedIn"))
+                        logger.debug(f"Filled 'LinkedIn' for: '{label_text[:40]}'")
                     # Work authorization / sponsorship text inputs
                     elif any(kw in label_text for kw in ["authorized", "legally"]):
                         inp.fill("Yes")
@@ -1042,6 +1046,30 @@ class LinkedInApplicant:
             return ""
 
     def _fill_external_application(self, page, job, resume_path, cover_letter_path, output_dir):
+        """Fill external career site application using ATS-specific handlers.
+
+        Routes to Ashby/Greenhouse/Lever handlers when detected,
+        falls back to generic form filling for unknown ATS systems.
+        """
+        from src.ats_handlers import detect_ats, route_to_handler
+
+        url = page.url
+        ats_type = detect_ats(url)
+        logger.info(f"Detected ATS: {ats_type} for URL: {url}")
+
+        if ats_type == "unknown":
+            # Fall back to generic form filling (existing logic)
+            return self._fill_generic_external_application(page, job, resume_path, cover_letter_path, output_dir)
+
+        # Use ATS-specific handler
+        result = route_to_handler(page, self.profile, str(resume_path), str(cover_letter_path) if cover_letter_path else None)
+
+        # Take screenshots
+        self._take_screenshot(page, job, output_dir, f"ats_{ats_type}_result")
+        result["screenshots"] = list(self.screenshots)
+        return result
+
+    def _fill_generic_external_application(self, page, job, resume_path, cover_letter_path, output_dir):
         """Try to fill out an external career site application form.
 
         Uses common patterns across ATS systems (Greenhouse, Lever, Workday, etc.)
