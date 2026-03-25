@@ -29,7 +29,7 @@ from src.deslop import clean_docx
 STOP_FILE = Path('/Users/sacsimoto/GitHub/aipply/.stop')
 
 
-def scan_jobs(keyword="compliance manager", location="San Francisco Bay Area", limit=5):
+def scan_jobs(keyword="compliance manager", location="San Francisco Bay Area", limit=1):
     """Scan LinkedIn and return jobs with full descriptions."""
     if STOP_FILE.exists():
         print("🛑 EMERGENCY STOP — .stop file detected")

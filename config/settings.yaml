@@ -1,7 +1,20 @@
 # Aipply - Job Search Settings
 
 search:
+  # IC roles (90% of applications)
   keywords:
+    - "compliance analyst"
+    - "senior compliance analyst"
+    - "compliance officer"
+    - "risk analyst"
+    - "senior risk analyst"
+    - "audit analyst"
+    - "senior audit analyst"
+    - "governance analyst"
+    - "regulatory analyst"
+    - "compliance specialist"
+  # Manager roles (10% cap — cron instructions limit these)
+  manager_keywords:
     - "compliance manager"
     - "audit manager"
   locations:

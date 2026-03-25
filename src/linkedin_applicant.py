@@ -142,29 +142,32 @@ class LinkedInApplicant:
 
             self._take_screenshot(self.page, job, output_dir, "job_page")
 
-            # Check for Easy Apply / Apply button — LinkedIn uses <a>, <button>, or <div>
+            # Check for Easy Apply button ONLY — reject external "Apply" buttons
+            # LinkedIn Easy Apply uses <a> with aria-label containing "Easy Apply"
+            # External Apply uses <a> with aria-label "Apply to this job" + external link
             easy_apply_btn = None
             for ea_selector in [
                 'a[aria-label*="Easy Apply"]',
                 'a:has-text("Easy Apply")',
                 'button[aria-label*="Easy Apply"]',
-                'button.jobs-apply-button',
                 'button:has-text("Easy Apply")',
-                'a[aria-label*="Apply to this job"]',
-                'a:has-text("Apply")',
-                'button:has-text("Apply")',
             ]:
                 try:
                     loc = self.page.locator(ea_selector).first
                     if loc.is_visible(timeout=2000):
-                        easy_apply_btn = loc
-                        logger.info(f"Found Easy Apply with selector: {ea_selector}")
-                        break
+                        # Verify it actually says "Easy Apply", not just "Apply"
+                        btn_text = loc.inner_text().strip()
+                        if "Easy" in btn_text:
+                            easy_apply_btn = loc
+                            logger.info(f"Found Easy Apply: '{btn_text}' via {ea_selector}")
+                            break
+                        else:
+                            logger.info(f"Skipping non-Easy Apply button: '{btn_text}'")
                 except Exception:
                     continue
             
             if not easy_apply_btn:
-                logger.info(f"No Easy Apply button for {role} at {company}")
+                logger.info(f"No Easy Apply for {role} at {company} — external apply only")
                 return {
                     "success": False,
                     "status": "manual_needed",
