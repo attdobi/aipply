@@ -758,6 +758,14 @@ class LinkedInApplicant:
                             decline.click()
                             logger.debug(f"Radio: Decline for EEO '{legend_text[:40]}'")
 
+                    # CATCH-ALL: Any other Yes/No question — always say Yes
+                    else:
+                        yes_label = fieldset.locator("label:has-text('Yes')").first
+                        if yes_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            yes_label.click()
+                            logger.debug(f"Radio: Yes (catch-all) for '{legend_text[:40]}'")
+
                 except Exception:
                     continue
         except Exception:
