@@ -30,6 +30,7 @@ POSITIVE_KEYWORDS = [
     "fraud analyst",
     "regulatory analyst",
     "operations analyst",
+    "data analyst",
     "compliance specialist",
     "compliance officer",
     "compliance coordinator",
