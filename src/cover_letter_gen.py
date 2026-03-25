@@ -1,189 +1,147 @@
 """Cover letter generation module.
 
-Uses OpenAI to generate a targeted cover letter for each job
-based on the job description and candidate profile.
+Uses Claude Opus to generate company-specific cover letters,
+then writes them as clean .docx files matching the candidate's style.
 """
 
+import json
 import logging
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import anthropic
 from docx import Document
 from docx.shared import Pt, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from dotenv import load_dotenv
-from openai import OpenAI
 
 from src.utils import ensure_dir, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are a professional cover letter writer. Your task is to generate a \
-compelling, genuine cover letter for a specific job application.
+You are a professional cover letter writer. Write a concise, compelling cover \
+letter for a specific job application. Match the candidate's voice — direct, \
+confident, no fluff. The letter should:
 
-RULES:
-1. Keep it concise — 3 to 4 paragraphs maximum.
-2. Reference specific requirements from the job description and explain \
-how the candidate meets them.
-3. Use the candidate's actual strengths and experience — never fabricate.
-4. Match the candidate's writing style if an example letter is provided.
-5. Be genuine and specific, not generic. Avoid clichés like "I am writing \
-to express my interest…" — start with something engaging.
-6. Close with a confident but not arrogant call to action.
-7. Output ONLY the letter body (no headers, addresses, or "Dear …" / \
-"Sincerely," — those will be added by the formatting step). Actually, \
-DO include the salutation ("Dear Hiring Manager,") and sign-off \
-("Sincerely, {name}").
-"""
+1. Be 3-4 paragraphs max (opening, experience match, why this company, closing).
+2. Reference SPECIFIC experience from the candidate's background that matches the role.
+3. Mention the company by name and show you understand what they do.
+4. Sound like a real person, not a template. No generic phrases like "I am excited to apply."
+5. Keep it under 350 words.
+6. Do NOT fabricate experience or qualifications.
+
+OUTPUT FORMAT (strict JSON):
+{
+  "greeting": "Dear Hiring Team,",
+  "body_paragraphs": ["paragraph 1", "paragraph 2", "paragraph 3"],
+  "closing": "Thank you for your time,",
+  "notes": "Brief explanation of approach"
+}
+
+Return ONLY the JSON object."""
 
 
 class CoverLetterGenerator:
-    """Generates tailored cover letters using AI."""
+    """Generates company-specific cover letters using AI."""
 
     def __init__(self, config: dict[str, Any] | None = None):
-        """Initialize generator with OpenAI configuration.
-
-        Args:
-            config: Full settings dict (expects ``openai`` sub-key).
-        """
         load_dotenv()
         self.config = config or {}
-        openai_config = self.config.get("openai", {})
+        from openai import OpenAI
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model: str = openai_config.get("model", "gpt-4")
-        self.temperature: float = openai_config.get("temperature", 0.7)
+        self.model = self.config.get("openai", {}).get("model", "gpt-4")
 
-    # ------------------------------------------------------------------
-    # Reading example letter
-    # ------------------------------------------------------------------
+    def _call_ai(self, system: str, user: str) -> str:
+        logger.info("Calling %s for cover letter", self.model)
+        response = self.client.chat.completions.create(
+            model=self.model,
+            temperature=0.5,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return response.choices[0].message.content or ""
 
-    def read_example_cover_letter(self, path: str | Path) -> str:
-        """Read a ``.docx`` example cover letter for tone/style reference.
-
-        Args:
-            path: Path to the example letter file.
-
-        Returns:
-            Full text content of the example letter.
-        """
-        path = Path(path)
-        if not path.exists():
-            logger.warning("Example cover letter not found at %s — skipping", path)
-            return ""
-
-        doc = Document(str(path))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        text = "\n".join(paragraphs)
-        logger.info("Read example cover letter from %s (%d chars)", path, len(text))
-        return text
-
-    # ------------------------------------------------------------------
-    # Generation
-    # ------------------------------------------------------------------
-
-    def generate(
-        self,
-        job_description: str,
-        candidate_profile: dict[str, Any],
-        company: str = "",
-        role: str = "",
-        example_letter_path: str | Path | None = None,
-    ) -> str:
-        """Generate a cover letter for a specific job.
-
-        Args:
-            job_description: Full text of the job description.
-            candidate_profile: Candidate info dict from ``config/profile.yaml``
-                               (expects keys: ``name``, ``email``, ``summary``,
-                               ``strengths``, ``target_roles``).
-            company: Target company name.
-            role: Target role title.
-            example_letter_path: Optional path to an example ``.docx`` letter
-                                 to match tone/style.
-
-        Returns:
-            Generated cover letter text.
-        """
-        # Build context from candidate profile
+    def generate(self, job_description: str, candidate_profile: dict,
+                 company: str, role: str) -> dict:
+        """Generate cover letter content via AI."""
+        # Build candidate context from profile
         name = candidate_profile.get("name", "")
+        email = candidate_profile.get("email", "")
+        phone = candidate_profile.get("phone", "")
         summary = candidate_profile.get("summary", "")
         strengths = candidate_profile.get("strengths", [])
-        target_roles = candidate_profile.get("target_roles", [])
-        email = candidate_profile.get("email", "")
-        location = candidate_profile.get("location", "")
 
-        strengths_str = ", ".join(strengths) if strengths else "N/A"
-        target_str = ", ".join(target_roles) if target_roles else "N/A"
-
-        # Optionally incorporate example letter style
-        style_context = ""
-        if example_letter_path:
-            example_text = self.read_example_cover_letter(example_letter_path)
-            if example_text:
-                style_context = (
-                    f"\n\nHere is an example of the candidate's writing style "
-                    f"(match this tone and voice):\n\n"
-                    f"---BEGIN EXAMPLE---\n{example_text}\n---END EXAMPLE---"
-                )
+            # Read the example cover letter for tone reference
+        example_text = ""
+        example_path = Path("templates/base_cover_letter.docx")
+        if example_path.exists():
+            try:
+                from docx import Document as DocxDoc
+                edoc = DocxDoc(str(example_path))
+                example_text = "\n".join(p.text for p in edoc.paragraphs if p.text.strip())
+            except Exception:
+                pass
 
         user_prompt = (
-            f"Generate a cover letter for the following application:\n\n"
-            f"**Role:** {role}\n"
-            f"**Company:** {company}\n\n"
-            f"**Candidate:**\n"
-            f"- Name: {name}\n"
-            f"- Email: {email}\n"
-            f"- Location: {location}\n"
-            f"- Summary: {summary}\n"
-            f"- Key Strengths: {strengths_str}\n"
-            f"- Target Roles: {target_str}\n\n"
-            f"**Job Description:**\n\n"
-            f"---BEGIN JOB DESCRIPTION---\n{job_description}\n---END JOB DESCRIPTION---"
-            f"{style_context}"
+            f"CANDIDATE:\n"
+            f"Name: {name}\n"
+            f"Email: {email}\n"
+            f"Phone: {phone}\n"
+            f"Summary: {summary}\n"
+            f"Key strengths: {', '.join(strengths)}\n\n"
+        )
+        if example_text:
+            user_prompt += (
+                f"EXAMPLE COVER LETTER (match this tone and style):\n"
+                f"{example_text}\n\n"
+            )
+        user_prompt += (
+            f"TARGET: {role} at {company}\n\n"
+            f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
+            f"Write a tailored cover letter. ONLY reference the candidate's ACTUAL experience "
+            f"listed above and in the example letter. NEVER invent companies, roles, or experience. "
+            f"The candidate worked at: OCC (federal bank examiner), Prime Trust, Cross River Bank, and PG&E (current)."
         )
 
-        logger.info("Requesting cover letter from %s (company=%s, role=%s)", self.model, company, role)
+        raw = self._call_ai(SYSTEM_PROMPT, user_prompt)
+
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                temperature=self.temperature,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            content = response.choices[0].message.content or ""
-            logger.info("Received cover letter (%d chars)", len(content))
-            return content.strip()
-        except Exception as exc:
-            logger.error("OpenAI API call failed: %s", exc)
-            raise
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+                if clean.endswith("```"):
+                    clean = clean[:-3]
+            result = json.loads(clean)
+            result.setdefault("greeting", "Dear Hiring Team,")
+            result.setdefault("closing", "Thank you for your time,")
+            return result
+        except json.JSONDecodeError:
+            logger.error("Failed to parse cover letter JSON: %s", raw[:200])
+            return {
+                "greeting": "Dear Hiring Team,",
+                "body_paragraphs": [raw.strip()],
+                "closing": f"Thank you for your time,\n{name}\n{email}" + (f" | {phone}" if phone else ""),
+                "notes": "AI response was not JSON — used raw text",
+            }
 
-    # ------------------------------------------------------------------
-    # Saving
-    # ------------------------------------------------------------------
-
-    def save_cover_letter(self, content: str, output_path: str | Path) -> Path:
-        """Save a cover letter to a ``.docx`` file with clean formatting.
-
-        Args:
-            content: Cover letter text.
-            output_path: Destination ``.docx`` file path.
-
-        Returns:
-            :class:`Path` to the saved file.
-        """
+    def save_cover_letter(self, content: dict, candidate_profile: dict,
+                           output_path: str | Path) -> Path:
+        """Save cover letter as a professionally formatted .docx."""
         output_path = Path(output_path)
         ensure_dir(output_path.parent)
 
         doc = Document()
 
         # Set default font
-        style = doc.styles["Normal"]
+        style = doc.styles['Normal']
         font = style.font
-        font.name = "Calibri"
+        font.name = 'Calibri'
         font.size = Pt(11)
 
         # Set margins
@@ -193,55 +151,44 @@ class CoverLetterGenerator:
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
 
-        # Add date
-        doc.add_paragraph(datetime.now().strftime("%B %d, %Y"))
-        doc.add_paragraph("")  # blank line
+        # Greeting
+        greeting = content.get("greeting", "Dear Hiring Team,")
+        p = doc.add_paragraph(greeting)
+        p.space_after = Pt(6)
 
-        # Add letter body
-        paragraphs = content.split("\n\n")
-        for para_text in paragraphs:
-            cleaned = para_text.strip()
-            if cleaned:
-                doc.add_paragraph(cleaned)
+        # Body paragraphs
+        for para_text in content.get("body_paragraphs", []):
+            p = doc.add_paragraph(para_text)
+            p.space_after = Pt(6)
+
+        # Closing
+        closing = content.get("closing", "Thank you for your time,")
+        p = doc.add_paragraph()
+        p.space_before = Pt(12)
+        p.add_run(closing)
+
+        # Signature
+        name = candidate_profile.get("name", "")
+        email = candidate_profile.get("email", "")
+        phone = candidate_profile.get("phone", "")
+        if name:
+            p = doc.add_paragraph()
+            p.add_run(name).bold = True
+        contact_parts = [x for x in [email, phone] if x]
+        if contact_parts:
+            doc.add_paragraph(" | ".join(contact_parts))
 
         doc.save(str(output_path))
         logger.info("Saved cover letter to %s", output_path)
         return output_path
 
-    # ------------------------------------------------------------------
-    # Convenience
-    # ------------------------------------------------------------------
-
-    def generate_and_save(
-        self,
-        job_description: str,
-        candidate_profile: dict[str, Any],
-        company: str,
-        role: str,
-        output_dir: str | Path | None = None,
-        example_letter_path: str | Path | None = None,
-    ) -> Path:
-        """Generate a cover letter and save it in one call.
-
-        Args:
-            job_description: Full job description text.
-            candidate_profile: Candidate profile dict.
-            company: Target company name.
-            role: Target role title.
-            output_dir: Directory to save the output. Defaults to
-                        ``output/applications/{company}_{role}_{date}/``.
-            example_letter_path: Optional example letter for tone matching.
-
-        Returns:
-            :class:`Path` to the saved ``.docx`` file.
-        """
-        letter_text = self.generate(
-            job_description=job_description,
-            candidate_profile=candidate_profile,
-            company=company,
-            role=role,
-            example_letter_path=example_letter_path,
-        )
+    def generate_and_save(self, job_description: str, candidate_profile: dict,
+                           company: str, role: str,
+                           output_dir: str | Path | None = None) -> Path:
+        """Generate and save in one call."""
+        logger.info("Generating cover letter for %s at %s", role, company)
+        content = self.generate(job_description, candidate_profile, company, role)
+        logger.info("Cover letter notes: %s", content.get("notes", ""))
 
         if output_dir is None:
             date_str = datetime.now().strftime("%Y%m%d")
@@ -252,4 +199,4 @@ class CoverLetterGenerator:
         filename = sanitize_filename(f"cover_letter_{company}_{role}") + ".docx"
         output_path = output_dir / filename
 
-        return self.save_cover_letter(letter_text, output_path)
+        return self.save_cover_letter(content, candidate_profile, output_path)
