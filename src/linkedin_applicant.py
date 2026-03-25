@@ -1035,86 +1035,260 @@ class LinkedInApplicant:
 
     def _fill_external_application(self, page, job, resume_path, cover_letter_path, output_dir):
         """Try to fill out an external career site application form.
-        
+
         Uses common patterns across ATS systems (Greenhouse, Lever, Workday, etc.)
         to find and fill form fields, upload resume, and submit.
+
+        Supports Workday iframe detection, login/signup page detection,
+        LinkedIn URL fields, cover letter upload, and minimum-fields threshold.
         """
         company = job.get("company", "")
         role = job.get("title", "")
         logger.info(f"Attempting external application on {page.url}")
 
+        # --- Login/signup detection ---
+        try:
+            page_text = page.evaluate("() => document.body.innerText").lower()
+            if any(phrase in page_text for phrase in [
+                "sign in", "create account", "sign up", "log in", "register",
+            ]):
+                login_forms = page.query_selector_all('form input[type="password"]')
+                if login_forms:
+                    logger.info("Login/signup page detected, marking as manual_needed")
+                    self._take_screenshot(page, job, output_dir, "external_login_detected")
+                    return {
+                        "success": False,
+                        "status": "manual_needed",
+                        "reason": "login_required",
+                        "screenshots": list(self.screenshots),
+                    }
+        except Exception as e:
+            logger.debug(f"Login detection check failed: {e}")
+
+        # --- Workday iframe detection ---
+        workday_frame = None
+        for frame_src_pattern in ["workday.com", "myworkdayjobs.com"]:
+            try:
+                frame = page.frame_locator(f'iframe[src*="{frame_src_pattern}"]')
+                if frame.locator("body").count() > 0:
+                    workday_frame = frame
+                    logger.info(f"Detected Workday iframe ({frame_src_pattern})")
+                    break
+            except Exception:
+                pass
+
+        # Helper: query element — uses workday_frame if present, else page
+        def _q(selector):
+            """Query a single element, preferring Workday iframe context."""
+            if workday_frame:
+                loc = workday_frame.locator(selector)
+                if loc.count() > 0:
+                    return loc.first
+                return None
+            return page.query_selector(selector)
+
+        def _q_all(selector):
+            """Query all matching elements, preferring Workday iframe context."""
+            if workday_frame:
+                loc = workday_frame.locator(selector)
+                return [loc.nth(i) for i in range(loc.count())]
+            return page.query_selector_all(selector)
+
         # Common field patterns across ATS systems
-        name_fields = ['input[name*="name" i]', 'input[placeholder*="name" i]', 'input[aria-label*="name" i]', 'input#first_name', 'input#last_name', 'input[name*="first" i]', 'input[name*="last" i]']
-        email_fields = ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]', 'input[aria-label*="email" i]']
-        phone_fields = ['input[type="tel"]', 'input[name*="phone" i]', 'input[placeholder*="phone" i]', 'input[aria-label*="phone" i]']
-        resume_fields = ['input[type="file"]', 'input[accept*=".pdf" i]', 'input[accept*=".doc" i]', 'input[name*="resume" i]']
+        name_fields = [
+            'input[name*="name" i]', 'input[placeholder*="name" i]',
+            'input[aria-label*="name" i]', 'input#first_name', 'input#last_name',
+            'input[name*="first" i]', 'input[name*="last" i]',
+        ]
+        email_fields = [
+            'input[type="email"]', 'input[name*="email" i]',
+            'input[placeholder*="email" i]', 'input[aria-label*="email" i]',
+        ]
+        phone_fields = [
+            'input[type="tel"]', 'input[name*="phone" i]',
+            'input[placeholder*="phone" i]', 'input[aria-label*="phone" i]',
+        ]
+        linkedin_fields = [
+            'input[name*="linkedin" i]', 'input[placeholder*="linkedin" i]',
+            'input[aria-label*="linkedin" i]', 'input[name*="url" i]',
+            'input[placeholder*="URL" i]',
+        ]
+        resume_fields = [
+            'input[type="file"]', 'input[accept*=".pdf" i]',
+            'input[accept*=".doc" i]', 'input[name*="resume" i]',
+        ]
 
-        filled_something = False
+        # Workday-specific selectors
+        workday_name_fields = [
+            'input[data-automation-id="name"]',
+            'input[data-automation-id="legalNameSection_firstName"]',
+            'input[data-automation-id="legalNameSection_lastName"]',
+        ]
+        workday_email_fields = ['input[data-automation-id="email"]']
+        workday_phone_fields = ['input[data-automation-id="phone"]']
 
-        # Fill name fields
+        filled_count = 0
+
+        # --- Fill name fields (standard) ---
         for sel in name_fields:
             try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    val = el.input_value() or ""
-                    if not val.strip():
-                        field_name = (el.get_attribute("name") or el.get_attribute("placeholder") or "").lower()
-                        if "first" in field_name:
-                            el.fill("Danna")
-                        elif "last" in field_name:
-                            el.fill("Dobi")
-                        else:
-                            el.fill("Danna Dobi")
-                        time.sleep(random.uniform(1, 2))
-                        filled_something = True
-                        logger.info(f"Filled name field: {sel}")
+                el = _q(sel)
+                if el:
+                    is_vis = el.is_visible() if hasattr(el, 'is_visible') else True
+                    if is_vis:
+                        val = el.input_value() or ""
+                        if not val.strip():
+                            field_name = ""
+                            try:
+                                field_name = (el.get_attribute("name") or el.get_attribute("placeholder") or "").lower()
+                            except Exception:
+                                pass
+                            if "first" in field_name:
+                                el.fill("Danna")
+                            elif "last" in field_name:
+                                el.fill("Dobi")
+                            else:
+                                el.fill("Danna Dobi")
+                            time.sleep(random.uniform(1, 2))
+                            filled_count += 1
+                            logger.info(f"Filled name field: {sel}")
             except Exception:
                 pass
 
-        # Fill email
-        for sel in email_fields:
+        # --- Fill name fields (Workday-specific) ---
+        if workday_frame:
+            for sel in workday_name_fields:
+                try:
+                    el = _q(sel)
+                    if el:
+                        val = el.input_value() or ""
+                        if not val.strip():
+                            auto_id = ""
+                            try:
+                                auto_id = el.get_attribute("data-automation-id") or ""
+                            except Exception:
+                                pass
+                            if "firstName" in auto_id:
+                                el.fill("Danna")
+                            elif "lastName" in auto_id:
+                                el.fill("Dobi")
+                            else:
+                                el.fill("Danna Dobi")
+                            time.sleep(random.uniform(1, 2))
+                            filled_count += 1
+                            logger.info(f"Filled Workday name field: {sel}")
+                except Exception:
+                    pass
+
+        # --- Fill email (standard + Workday) ---
+        all_email_sels = email_fields + (workday_email_fields if workday_frame else [])
+        for sel in all_email_sels:
             try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    val = el.input_value() or ""
-                    if not val.strip():
-                        el.fill("danna.dobi@gmail.com")
-                        time.sleep(random.uniform(1, 2))
-                        filled_something = True
-                        logger.info(f"Filled email: {sel}")
+                el = _q(sel)
+                if el:
+                    is_vis = el.is_visible() if hasattr(el, 'is_visible') else True
+                    if is_vis:
+                        val = el.input_value() or ""
+                        if not val.strip():
+                            el.fill("danna.dobi@gmail.com")
+                            time.sleep(random.uniform(1, 2))
+                            filled_count += 1
+                            logger.info(f"Filled email: {sel}")
             except Exception:
                 pass
 
-        # Fill phone
-        for sel in phone_fields:
+        # --- Fill phone (standard + Workday) ---
+        all_phone_sels = phone_fields + (workday_phone_fields if workday_frame else [])
+        for sel in all_phone_sels:
             try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    val = el.input_value() or ""
-                    if not val.strip():
-                        el.fill("5103338812")
-                        time.sleep(random.uniform(1, 2))
-                        filled_something = True
-                        logger.info(f"Filled phone: {sel}")
+                el = _q(sel)
+                if el:
+                    is_vis = el.is_visible() if hasattr(el, 'is_visible') else True
+                    if is_vis:
+                        val = el.input_value() or ""
+                        if not val.strip():
+                            el.fill("5103338812")
+                            time.sleep(random.uniform(1, 2))
+                            filled_count += 1
+                            logger.info(f"Filled phone: {sel}")
             except Exception:
                 pass
 
-        # Upload resume
+        # --- Fill LinkedIn URL ---
+        for sel in linkedin_fields:
+            try:
+                el = _q(sel)
+                if el:
+                    is_vis = el.is_visible() if hasattr(el, 'is_visible') else True
+                    if is_vis:
+                        val = el.input_value() or ""
+                        if not val.strip():
+                            el.fill("https://www.linkedin.com/in/dannadobi")
+                            time.sleep(random.uniform(1, 2))
+                            filled_count += 1
+                            logger.info(f"Filled LinkedIn URL: {sel}")
+            except Exception:
+                pass
+
+        # --- Upload resume ---
         for sel in resume_fields:
             try:
-                el = page.query_selector(sel)
+                el = _q(sel)
                 if el:
-                    if resume_path and os.path.exists(resume_path):
+                    if resume_path and os.path.exists(str(resume_path)):
                         el.set_input_files(str(resume_path))
                         time.sleep(random.uniform(2, 4))
-                        filled_something = True
+                        filled_count += 1
                         logger.info(f"Uploaded resume via {sel}")
                     break
             except Exception:
                 pass
 
+        # --- Upload cover letter ---
+        if cover_letter_path and os.path.exists(str(cover_letter_path)):
+            cl_upload_sels = [
+                'input[type="file"][name*="cover" i]',
+                'input[type="file"][accept*=".pdf" i]',
+            ]
+            all_file_inputs = _q_all('input[type="file"]')
+            cl_uploaded = False
+
+            for sel in cl_upload_sels:
+                try:
+                    el = _q(sel)
+                    if el:
+                        el.set_input_files(str(cover_letter_path))
+                        time.sleep(random.uniform(2, 4))
+                        filled_count += 1
+                        cl_uploaded = True
+                        logger.info(f"Uploaded cover letter via {sel}")
+                        break
+                except Exception:
+                    pass
+
+            # Try second file input as fallback (first is usually resume)
+            if not cl_uploaded and len(all_file_inputs) >= 2:
+                try:
+                    second_input = all_file_inputs[1]
+                    second_input.set_input_files(str(cover_letter_path))
+                    time.sleep(random.uniform(2, 4))
+                    filled_count += 1
+                    logger.info("Uploaded cover letter via second file input")
+                except Exception as e:
+                    logger.debug(f"Cover letter upload via second file input failed: {e}")
+
         time.sleep(random.uniform(2, 4))
         self._take_screenshot(page, job, output_dir, "external_form_filled")
+
+        # --- Minimum fields threshold ---
+        if filled_count < 2:
+            logger.info(f"Only filled {filled_count} field(s), marking as manual_needed")
+            return {
+                "success": False,
+                "status": "manual_needed",
+                "reason": "external_form_too_few_fields_filled",
+                "screenshots": list(self.screenshots),
+            }
 
         # Try to find and click submit
         submitted = False
@@ -1147,18 +1321,11 @@ class LinkedInApplicant:
                 "reason": "external_apply_submitted",
                 "screenshots": list(self.screenshots),
             }
-        elif filled_something:
-            return {
-                "success": False,
-                "status": "manual_needed",
-                "reason": "external_form_partially_filled",
-                "screenshots": list(self.screenshots),
-            }
         else:
             return {
                 "success": False,
                 "status": "manual_needed",
-                "reason": "external_form_not_recognized",
+                "reason": f"external_form_partially_filled ({filled_count} fields)",
                 "screenshots": list(self.screenshots),
             }
 

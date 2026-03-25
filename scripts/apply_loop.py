@@ -296,7 +296,6 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
         f"https://www.linkedin.com/jobs/search/"
         f"?keywords={quote_plus(keyword)}"
         f"&location={quote_plus(location)}"
-        f"&f_AL=true"
         f"&sortBy=DD"
         f"{extra_params}"
     )
@@ -389,23 +388,6 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
             logger.warning(f"Card click failed: {e}")
             continue
 
-        # Check for Easy Apply button
-        easy_apply_btn = None
-        for ea_sel in ['button[aria-label*="Easy Apply"]', 'button:has-text("Easy Apply")']:
-            try:
-                loc = scanner_page.locator(ea_sel).first
-                if loc.is_visible(timeout=2000):
-                    btn_text = loc.inner_text().strip()
-                    if "Easy" in btn_text:
-                        easy_apply_btn = loc
-                        break
-            except Exception:
-                continue
-
-        if not easy_apply_btn:
-            logger.info(f"  No Easy Apply, skipping")
-            continue
-
         # Read description
         description = ""
         try:
@@ -442,8 +424,8 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
                 if location_text:
                     break
 
-        # Found an Easy Apply job — tailor and apply
-        logger.info(f">>> EASY APPLY: {title_text} @ {company_text}")
+        # Found a matching job — tailor and apply
+        logger.info(f">>> APPLYING: {title_text} @ {company_text}")
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = sanitize_filename(f"{company_text}_{title_text}"[:50])
@@ -546,7 +528,7 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
             "job_dir": str(job_dir),
         }
 
-    logger.info("No matching Easy Apply jobs found in this search")
+    logger.info("No matching jobs found in this search")
     return None
 
 
