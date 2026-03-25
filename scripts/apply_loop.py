@@ -163,7 +163,9 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
             if company_el:
                 break
 
-        title_text = (title_el.inner_text().strip() if title_el else "").split("\n")[0].strip()
+        raw_title = (title_el.inner_text().strip() if title_el else "").split("\n")[0].strip()
+        # Remove LinkedIn UI artifacts like "with verification"
+        title_text = raw_title.replace(" with verification", "").strip()
         company_text = company_el.inner_text().strip() if company_el else ""
 
         if not title_text or not company_text:
