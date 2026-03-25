@@ -45,6 +45,7 @@ class ApplicationTracker:
         job_description: str = "",
         jd_file_path: str = "",
         notes: str = "",
+        screenshots: list = None,
     ) -> dict:
         """Record a new job application."""
         # Convert all paths to absolute for file:// links
@@ -67,6 +68,7 @@ class ApplicationTracker:
             "jd_file_path": jd_file_path,
             "job_description": job_description,
             "notes": notes,
+            "screenshots": screenshots or [],
             "applied_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }

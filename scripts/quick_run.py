@@ -9,6 +9,7 @@ This script handles scanning, file I/O, and tracking.
 import os
 import sys
 import json
+import shutil
 import yaml
 from datetime import datetime
 from pathlib import Path
@@ -117,7 +118,7 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
 
     # --- Easy Apply submission ---
     status = 'materials_ready'
-    apply_screenshot = ''
+    saved_screenshots = []
     if not dry_run:
         try:
             from src.linkedin_applicant import LinkedInApplicant
@@ -130,17 +131,35 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
             )
             applicant.close()
 
+            # Copy screenshots to application output directory
+            apply_screenshots = apply_result.get('screenshots', [])
+            for ss_path in apply_screenshots:
+                if ss_path and Path(ss_path).exists():
+                    dest = out_dir / Path(ss_path).name
+                    shutil.copy2(ss_path, dest)
+                    saved_screenshots.append(str(dest.resolve()))
+
+            # Map status — "applied" stays applied, everything else → manual_needed
             apply_status = apply_result.get('status', 'failed')
             if apply_status == 'applied':
                 status = 'applied'
             elif apply_result.get('reason') == 'not_easy_apply':
                 status = 'manual_needed'
             else:
-                status = 'apply_failed'
-            apply_screenshot = apply_result.get('screenshot_path', '')
+                status = 'manual_needed'
         except Exception as e:
             print(f"  ⚠️ Easy Apply failed: {e}")
-            status = 'apply_failed'
+            status = 'manual_needed'
+
+    # Build notes with screenshot paths
+    apply_notes = ''
+    if not dry_run:
+        try:
+            apply_notes = apply_result.get('reason', '')
+        except NameError:
+            apply_notes = ''
+    if saved_screenshots:
+        apply_notes += f" | screenshots: {','.join(saved_screenshots)}"
 
     # Track
     tracker = ApplicationTracker('output/tracker.json')
@@ -151,6 +170,8 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
         cover_letter_path=str(cl_path),
         jd_file_path=str(jd_path),
         job_description=desc[:500],
+        notes=apply_notes.strip(),
+        screenshots=saved_screenshots,
     )
 
     # Regenerate report
@@ -160,6 +181,8 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
         'company': company, 'title': title,
         'resume': str(resume_path), 'cover_letter': str(cl_path),
         'job_description': str(jd_path),
+        'screenshots': saved_screenshots,
+        'apply_status': status,
     }
 
 
