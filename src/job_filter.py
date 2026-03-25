@@ -91,6 +91,10 @@ NEGATIVE_KEYWORDS = [
     "property manager",
     "proposal strategist",
     "international payroll",
+    "cpa",
+    "public accountant",
+    "tax accountant",
+    "tax manager",
 ]
 
 # Too-senior titles to skip

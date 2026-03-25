@@ -670,6 +670,25 @@ class LinkedInApplicant:
                             yes_label.click()
                             logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
 
+                    # License/certification questions (CPA, Public Accountant, etc.)
+                    elif any(kw in legend_text for kw in [
+                        "license", "certification", "certified public accountant",
+                        "public accountant", "cpa",
+                    ]):
+                        # Answer No unless it's CFE or CAMS (which Danna has)
+                        if any(kw in legend_text for kw in ["cfe", "fraud examiner", "cams", "anti-money"]):
+                            yes_label = fieldset.locator("label:has-text('Yes')").first
+                            if yes_label.is_visible(timeout=500):
+                                time.sleep(random.uniform(1, 2))
+                                yes_label.click()
+                                logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
+                        else:
+                            no_label = fieldset.locator("label:has-text('No')").first
+                            if no_label.is_visible(timeout=500):
+                                time.sleep(random.uniform(1, 2))
+                                no_label.click()
+                                logger.debug(f"Radio: No for '{legend_text[:40]}'")
+
                     # EEO questions — decline to self-identify
                     elif any(kw in legend_text for kw in [
                         "gender", "race", "veteran", "disability", "ethnicity",
