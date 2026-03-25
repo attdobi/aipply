@@ -142,10 +142,12 @@ class LinkedInApplicant:
 
             self._take_screenshot(self.page, job, output_dir, "job_page")
 
-            # Check for Easy Apply button ONLY — reject external "Apply" buttons
-            # LinkedIn Easy Apply uses <a> with aria-label containing "Easy Apply"
-            # External Apply uses <a> with aria-label "Apply to this job" + external link
+            # Find Apply button — Easy Apply (stays on LinkedIn) or Apply (external)
             easy_apply_btn = None
+            external_apply_btn = None
+            is_easy_apply = False
+
+            # First: look for Easy Apply
             for ea_selector in [
                 'a[aria-label*="Easy Apply"]',
                 'a:has-text("Easy Apply")',
@@ -155,23 +157,62 @@ class LinkedInApplicant:
                 try:
                     loc = self.page.locator(ea_selector).first
                     if loc.is_visible(timeout=2000):
-                        # Verify it actually says "Easy Apply", not just "Apply"
                         btn_text = loc.inner_text().strip()
                         if "Easy" in btn_text:
                             easy_apply_btn = loc
-                            logger.info(f"Found Easy Apply: '{btn_text}' via {ea_selector}")
+                            is_easy_apply = True
+                            logger.info(f"Found Easy Apply: '{btn_text}'")
                             break
-                        else:
-                            logger.info(f"Skipping non-Easy Apply button: '{btn_text}'")
                 except Exception:
                     continue
-            
+
+            # Second: if no Easy Apply, look for external Apply
             if not easy_apply_btn:
-                logger.info(f"No Easy Apply for {role} at {company} — external apply only")
+                for ap_selector in [
+                    'a[aria-label*="Apply to this job"]',
+                    'a:has-text("Apply")',
+                    'button:has-text("Apply")',
+                ]:
+                    try:
+                        loc = self.page.locator(ap_selector).first
+                        if loc.is_visible(timeout=2000):
+                            external_apply_btn = loc
+                            logger.info(f"Found external Apply button")
+                            break
+                    except Exception:
+                        continue
+
+            if not easy_apply_btn and not external_apply_btn:
+                logger.info(f"No Apply button found for {role} at {company}")
                 return {
                     "success": False,
                     "status": "manual_needed",
-                    "reason": "not_easy_apply",
+                    "reason": "no_apply_button",
+                    "screenshots": list(self.screenshots),
+                }
+
+            # Handle external Apply — open the link, screenshot, mark as manual
+            if external_apply_btn and not easy_apply_btn:
+                logger.info(f"External Apply for {role} at {company} — opening career site")
+                time.sleep(random.uniform(2, 4))
+                external_apply_btn.click()
+                time.sleep(random.uniform(3, 5))
+
+                # New tab may have opened — screenshot it
+                pages = self.page.context.pages
+                if len(pages) > 1:
+                    new_page = pages[-1]
+                    self._take_screenshot(new_page, job, output_dir, "external_career_site")
+                    career_url = new_page.url
+                    logger.info(f"External career site opened: {career_url}")
+                    new_page.close()
+                else:
+                    self._take_screenshot(self.page, job, output_dir, "external_apply_clicked")
+
+                return {
+                    "success": False,
+                    "status": "manual_needed",
+                    "reason": "external_apply_opened",
                     "screenshots": list(self.screenshots),
                 }
 
