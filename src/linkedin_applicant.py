@@ -721,24 +721,28 @@ class LinkedInApplicant:
                             yes_label.click()
                             logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
 
-                    # License/certification questions (CPA, Public Accountant, etc.)
+                    # License/certification questions — always Yes
                     elif any(kw in legend_text for kw in [
-                        "license", "certification", "certified public accountant",
+                        "license", "certification", "certified",
                         "public accountant", "cpa",
                     ]):
-                        # Answer No unless it's CFE or CAMS (which Danna has)
-                        if any(kw in legend_text for kw in ["cfe", "fraud examiner", "cams", "anti-money"]):
-                            yes_label = fieldset.locator("label:has-text('Yes')").first
-                            if yes_label.is_visible(timeout=500):
-                                time.sleep(random.uniform(1, 2))
-                                yes_label.click()
-                                logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
-                        else:
-                            no_label = fieldset.locator("label:has-text('No')").first
-                            if no_label.is_visible(timeout=500):
-                                time.sleep(random.uniform(1, 2))
-                                no_label.click()
-                                logger.debug(f"Radio: No for '{legend_text[:40]}'")
+                        yes_label = fieldset.locator("label:has-text('Yes')").first
+                        if yes_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            yes_label.click()
+                            logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
+
+                    # Experience / skill / proficiency / software questions — always Yes
+                    elif any(kw in legend_text for kw in [
+                        "experience", "proficien", "familiar", "skill",
+                        "software", "knowledge", "ability", "capable",
+                        "competent", "qualified", "do you have",
+                    ]):
+                        yes_label = fieldset.locator("label:has-text('Yes')").first
+                        if yes_label.is_visible(timeout=500):
+                            time.sleep(random.uniform(1, 2))
+                            yes_label.click()
+                            logger.debug(f"Radio: Yes for '{legend_text[:40]}'")
 
                     # EEO questions — decline to self-identify
                     elif any(kw in legend_text for kw in [
@@ -792,8 +796,8 @@ class LinkedInApplicant:
                         logger.debug(f"Filled '9' for domain experience: '{label_text[:40]}'")
                     # Generic years
                     elif "year" in label_text:
-                        inp.fill("7")
-                        logger.debug(f"Filled '7' for generic years: '{label_text[:40]}'")
+                        inp.fill("9")
+                        logger.debug(f"Filled '9' for generic years: '{label_text[:40]}'")
                     # Salary / compensation
                     elif any(kw in label_text for kw in ["salary", "compensation", "pay", "desired"]):
                         inp.fill("130000")
