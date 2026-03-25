@@ -98,6 +98,7 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
         status='materials_ready',
         resume_path=str(resume_path),
         cover_letter_path=str(cl_path),
+        jd_file_path=str(jd_path),
         job_description=desc[:500],
     )
 

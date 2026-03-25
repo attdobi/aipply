@@ -43,9 +43,18 @@ class ApplicationTracker:
         resume_path: str = "",
         cover_letter_path: str = "",
         job_description: str = "",
+        jd_file_path: str = "",
         notes: str = "",
     ) -> dict:
         """Record a new job application."""
+        # Convert all paths to absolute for file:// links
+        if resume_path:
+            resume_path = str(Path(resume_path).resolve())
+        if cover_letter_path:
+            cover_letter_path = str(Path(cover_letter_path).resolve())
+        if jd_file_path:
+            jd_file_path = str(Path(jd_file_path).resolve())
+
         application = {
             "id": len(self.applications) + 1,
             "company": company,
@@ -55,6 +64,7 @@ class ApplicationTracker:
             "status": status,
             "resume_path": resume_path,
             "cover_letter_path": cover_letter_path,
+            "jd_file_path": jd_file_path,
             "job_description": job_description,
             "notes": notes,
             "applied_at": datetime.now().isoformat(),
@@ -209,26 +219,15 @@ class ApplicationTracker:
             status_class = f"status-{app['status'].lower().replace(' ', '-').replace('_', '-')}"
             applied_date = datetime.fromisoformat(app['applied_at']).strftime('%m/%d/%Y %I:%M %p')
 
-            # Build file links (relative to report location)
-            resume_link = ""
+            # Build file links — paths are already absolute from add_application()
             resume_path = app.get('resume_path', '')
-            if resume_path and os.path.exists(resume_path):
-                resume_link = f'<a href="file:///{os.path.abspath(resume_path)}" target="_blank">📄 Resume</a>'
-            elif resume_path:
-                resume_link = f'<span style="color:#999">📄 {os.path.basename(resume_path)}</span>'
+            resume_link = f'<a href="file://{resume_path}">📄 Resume</a>' if resume_path else '—'
 
-            cl_link = ""
             cl_path = app.get('cover_letter_path', '')
-            if cl_path and os.path.exists(cl_path):
-                cl_link = f'<a href="file:///{os.path.abspath(cl_path)}" target="_blank">✉️ Cover Letter</a>'
-            elif cl_path:
-                cl_link = f'<span style="color:#999">✉️ {os.path.basename(cl_path)}</span>'
+            cl_link = f'<a href="file://{cl_path}">✉️ Cover Letter</a>' if cl_path else '—'
 
-            # Job description snippet
-            jd_snippet = app.get('job_description', app.get('notes', ''))[:150]
-            if len(jd_snippet) >= 150:
-                jd_snippet += '…'
-            jd_html = f'<span title="{jd_snippet}" style="font-size:0.8rem;color:#666">{jd_snippet[:80]}{"…" if len(jd_snippet) > 80 else ""}</span>' if jd_snippet else ''
+            jd_file = app.get('jd_file_path', '')
+            jd_link = f'<a href="file://{jd_file}">📝 View JD</a>' if jd_file else '—'
 
             html += f"""
                 <tr>
@@ -238,10 +237,10 @@ class ApplicationTracker:
                     <td>{app['location']}</td>
                     <td><span class="status {status_class}">{app['status'].replace('_',' ').title()}</span></td>
                     <td>{applied_date}</td>
-                    <td><a href="{app['job_url']}" target="_blank">🔗 View</a></td>
-                    <td>{resume_link or '<span style="color:#ccc">—</span>'}</td>
-                    <td>{cl_link or '<span style="color:#ccc">—</span>'}</td>
-                    <td>{jd_html or '<span style="color:#ccc">—</span>'}</td>
+                    <td><a href="{app['job_url']}" target="_blank">🔗 Job Post</a></td>
+                    <td>{resume_link}</td>
+                    <td>{cl_link}</td>
+                    <td>{jd_link}</td>
                 </tr>
 """
 
