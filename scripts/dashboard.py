@@ -4,16 +4,30 @@
 import json
 import os
 import sys
+import threading
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template_string, send_file
+from flask import Flask, abort, jsonify, render_template_string, request, send_file
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8092
 ROOT = Path(__file__).resolve().parent.parent
 TRACKER = ROOT / "output" / "tracker.json"
 
 app = Flask(__name__)
+
+STOP_FILE = ROOT / ".stop"
+
+# Cycle state (thread-safe)
+_cycle_lock = threading.Lock()
+_cycle_state = {
+    "running": False,
+    "cycle_id": None,
+    "total": 0,
+    "processed": 0,
+    "last_cycle": None,
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,6 +38,8 @@ STATUS_COLORS = {
     "applied": ("#2e7d32", "#e8f5e9", "Applied"),
     "rejected": ("#c62828", "#ffebee", "Rejected"),
     "interview": ("#f9a825", "#fff8e1", "Interview"),
+    "manual_needed": ("#e65100", "#fff3e0", "Manual Needed"),
+    "apply_failed": ("#c62828", "#ffebee", "Apply Failed"),
 }
 
 
@@ -221,11 +237,25 @@ tr:last-child td { border-bottom: none; }
 /* Empty state */
 .empty { text-align: center; padding: 3rem; color: #888; font-size: 1.1rem; }
 
+/* Controls */
+.controls { background: #fff; border-bottom: 1px solid #e0e0e0; padding: .75rem 2rem; }
+.controls-inner { max-width: 1400px; margin: 0 auto; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.ctrl-btn { display: inline-flex; align-items: center; gap: .4rem; padding: .6rem 1.2rem; border: none; border-radius: 8px; font-size: .9rem; font-weight: 600; cursor: pointer; transition: all .15s; }
+.ctrl-btn:disabled { opacity: .45; cursor: not-allowed; }
+.ctrl-btn.green { background: #2e7d32; color: #fff; }
+.ctrl-btn.green:hover:not(:disabled) { background: #1b5e20; }
+.ctrl-btn.red { background: #c62828; color: #fff; }
+.ctrl-btn.red:hover:not(:disabled) { background: #b71c1c; }
+.ctrl-btn.resume { background: #1565c0; color: #fff; }
+.ctrl-btn.resume:hover:not(:disabled) { background: #0d47a1; }
+.status-indicator { margin-left: auto; font-weight: 600; font-size: .95rem; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .header { padding: 1rem; }
   .stats { padding: 1rem; }
   .table-wrap { padding: 0 1rem 1rem; }
+  .controls { padding: .75rem 1rem; }
   th, td { padding: .5rem; font-size: .8rem; }
 }
 </style>
@@ -238,6 +268,16 @@ tr:last-child td { border-bottom: none; }
     <div class="subtitle">Job Application Tracker</div>
   </div>
   <div class="subtitle">Last refresh: {{ now }}</div>
+</div>
+
+<!-- Controls -->
+<div class="controls" id="controlsBar">
+  <div class="controls-inner">
+    <button class="ctrl-btn green" id="btnStartCycle" onclick="startCycle()">🚀 Start Cycle (5 jobs)</button>
+    <button class="ctrl-btn red" id="btnStop" onclick="emergencyStop()">🛑 Emergency Stop</button>
+    <button class="ctrl-btn resume" id="btnResume" onclick="resumeOps()" style="display:none">▶️ Resume</button>
+    <span class="status-indicator" id="statusIndicator">🟢 Idle</span>
+  </div>
 </div>
 
 <div class="stats">
@@ -361,6 +401,68 @@ document.getElementById('previewModal').addEventListener('click', function(e) {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeModal();
 });
+
+// --- Controls ---
+function refreshStatus() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      const btnStart = document.getElementById('btnStartCycle');
+      const btnStop  = document.getElementById('btnStop');
+      const btnResume = document.getElementById('btnResume');
+      const indicator = document.getElementById('statusIndicator');
+
+      if (data.stopped) {
+        btnStop.style.display = 'none';
+        btnResume.style.display = '';
+        btnStart.disabled = true;
+        indicator.textContent = '🔴 Stopped';
+      } else {
+        btnStop.style.display = '';
+        btnResume.style.display = 'none';
+        indicator.textContent = '🟢 Idle';
+      }
+
+      if (data.cycle_running) {
+        btnStart.disabled = true;
+        indicator.textContent = '⏳ Cycle running (' + data.cycle_processed + '/' + data.cycle_total + ' jobs processed)';
+      } else if (!data.stopped) {
+        btnStart.disabled = false;
+      }
+    })
+    .catch(() => {});
+}
+
+function startCycle() {
+  if (!confirm('Start a new scan+apply cycle (5 jobs)?')) return;
+  fetch('/api/start-cycle', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({limit: 5})
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert(data.error); return; }
+      refreshStatus();
+    })
+    .catch(err => alert('Failed: ' + err));
+}
+
+function emergencyStop() {
+  fetch('/api/stop', { method: 'POST' })
+    .then(() => refreshStatus())
+    .catch(err => alert('Failed: ' + err));
+}
+
+function resumeOps() {
+  fetch('/api/resume', { method: 'POST' })
+    .then(() => refreshStatus())
+    .catch(err => alert('Failed: ' + err));
+}
+
+// Poll status every 10s
+refreshStatus();
+setInterval(refreshStatus, 10000);
 </script>
 
 </body>
@@ -528,6 +630,127 @@ def preview(filepath):
         html_parts.append("</ul>")
 
     return jsonify({"html": "\n".join(html_parts), "filename": full.name})
+
+
+# ---------------------------------------------------------------------------
+# API Endpoints — Controls
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/stop", methods=["POST"])
+def api_stop():
+    STOP_FILE.write_text("stopped")
+    return jsonify({"stopped": True})
+
+
+@app.route("/api/resume", methods=["POST"])
+def api_resume():
+    if STOP_FILE.exists():
+        STOP_FILE.unlink()
+    return jsonify({"stopped": False})
+
+
+@app.route("/api/status")
+def api_status():
+    apps = _load_tracker()
+    with _cycle_lock:
+        cycle = dict(_cycle_state)
+    return jsonify({
+        "running": not STOP_FILE.exists(),
+        "stopped": STOP_FILE.exists(),
+        "total_applications": len(apps),
+        "last_cycle": cycle.get("last_cycle"),
+        "cycle_running": cycle["running"],
+        "cycle_id": cycle["cycle_id"],
+        "cycle_total": cycle["total"],
+        "cycle_processed": cycle["processed"],
+    })
+
+
+@app.route("/api/start-cycle", methods=["POST"])
+def api_start_cycle():
+    """Kick off a scan+apply cycle in a background thread."""
+    if STOP_FILE.exists():
+        return jsonify({"error": "Emergency stop is active"}), 409
+
+    with _cycle_lock:
+        if _cycle_state["running"]:
+            return jsonify({"error": "A cycle is already running", "cycle_id": _cycle_state["cycle_id"]}), 409
+
+    data = request.get_json(silent=True) or {}
+    limit = data.get("limit", 5)
+    keyword = data.get("keyword", "compliance manager")
+    location = data.get("location", "San Francisco Bay Area")
+
+    cycle_id = str(uuid.uuid4())[:8]
+
+    with _cycle_lock:
+        _cycle_state.update({
+            "running": True,
+            "cycle_id": cycle_id,
+            "total": 0,
+            "processed": 0,
+        })
+
+    thread = threading.Thread(
+        target=_run_cycle_background,
+        args=(cycle_id, keyword, location, limit),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({"status": "started", "cycle_id": cycle_id})
+
+
+@app.route("/api/cycle-status")
+def api_cycle_status():
+    with _cycle_lock:
+        return jsonify(dict(_cycle_state))
+
+
+def _run_cycle_background(cycle_id, keyword, location, limit):
+    """Run a scan+apply cycle in a background thread."""
+    try:
+        # Import here to avoid circular issues
+        sys.path.insert(0, str(ROOT))
+        from scripts.quick_run import scan_jobs, save_application
+
+        # Scan for jobs
+        with _cycle_lock:
+            _cycle_state["total"] = 0
+            _cycle_state["processed"] = 0
+
+        jobs = scan_jobs(keyword=keyword, location=location, limit=limit)
+
+        with _cycle_lock:
+            _cycle_state["total"] = len(jobs)
+
+        for i, job in enumerate(jobs):
+            # Check stop file before each application
+            if STOP_FILE.exists():
+                print(f"🛑 Cycle {cycle_id} halted by emergency stop after {i} jobs")
+                break
+
+            try:
+                save_application(
+                    job=job,
+                    tailored_summary=job.get("description", "")[:500],
+                    competencies=[],
+                    cover_letter_text="",
+                    dry_run=True,
+                )
+            except Exception as e:
+                print(f"  ⚠️ Cycle {cycle_id}: Failed on job {i + 1}: {e}")
+
+            with _cycle_lock:
+                _cycle_state["processed"] = i + 1
+
+    except Exception as e:
+        print(f"❌ Cycle {cycle_id} failed: {e}")
+    finally:
+        with _cycle_lock:
+            _cycle_state["running"] = False
+            _cycle_state["last_cycle"] = datetime.now().isoformat()
 
 
 # ---------------------------------------------------------------------------
