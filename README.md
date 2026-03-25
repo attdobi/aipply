@@ -58,19 +58,93 @@ aipply/
 
 ### Prerequisites
 
-> Coming soon
+- **Python 3.10+**
+- **Google Chrome** (or Chromium) installed
+- **OpenAI API key** with GPT-4 access
+- **LinkedIn account** — you'll log in manually once; the bot reuses your session
 
 ### Installation
 
-> Coming soon
+```bash
+git clone https://github.com/attdobi/aipply.git
+cd aipply
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+```
 
 ### Configuration
 
-> Coming soon
+1. **Copy the example configs:**
+   ```bash
+   cp config/settings.example.yaml config/settings.yaml
+   cp config/profile.example.yaml config/profile.yaml
+   ```
+
+2. **Edit `config/settings.yaml`** — set your search keywords, target locations, excluded companies, and application preferences.
+
+3. **Edit `config/profile.yaml`** — fill in your name, email, phone, summary, strengths, and target roles. The AI uses this to tailor resumes and cover letters.
+
+4. **Add your base documents to `templates/`:**
+   - `templates/base_resume.docx` — your master resume (.docx format)
+   - `templates/base_cover_letter.docx` — an example cover letter for tone/style reference
+
+5. **Set your OpenAI API key:**
+   ```bash
+   echo "OPENAI_API_KEY=sk-your-key-here" > .env
+   ```
 
 ### Usage
 
-> Coming soon
+**Run a full application cycle:**
+```bash
+source .venv/bin/activate
+python scripts/run_cycle.py
+```
+
+**Dry run (scan jobs, tailor materials, but don't submit):**
+```bash
+python scripts/run_cycle.py --dry-run
+```
+
+**Limit number of applications per cycle:**
+```bash
+python scripts/run_cycle.py --limit 5
+```
+
+**Generate report only (no scanning or applying):**
+```bash
+python scripts/run_cycle.py --report-only
+```
+
+### Output
+
+Each application creates a directory under `output/applications/`:
+```
+output/applications/Acme_Corp_Compliance_Manager_2026-03-24/
+├── tailored_resume.docx
+├── cover_letter.docx
+├── job_description.txt
+└── screenshot.png       # Pre-submit screenshot for records
+```
+
+View all applications in the HTML report at `output/reports/applications_report.html`.
+
+### Cron / Automation
+
+To run every hour automatically, set up a cron job:
+```bash
+crontab -e
+# Add:
+0 * * * * cd /path/to/aipply && .venv/bin/python scripts/run_cycle.py >> output/cron.log 2>&1
+```
+
+Or use OpenClaw's built-in cron for agent-managed scheduling.
+
+## Privacy
+
+Personal data (resume, cover letter, configs with your name/email) is **gitignored by default** and never pushed to the repo. Only example configs ship publicly. See `.gitignore` for details.
 
 ## License
 
