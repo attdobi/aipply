@@ -222,17 +222,19 @@ class ApplicationTracker:
             status_class = f"status-{app['status'].lower().replace(' ', '-').replace('_', '-')}"
             applied_date = datetime.fromisoformat(app['applied_at']).strftime('%m/%d/%Y %I:%M %p')
 
-            # Build file links as relative web paths (served by dashboard.py)
-            def _web_link(abs_path, label):
+            def _rel(abs_path):
                 if not abs_path:
-                    return '—'
-                # Convert absolute path to relative from project root
-                rel = abs_path.replace(project_root + '/', '').replace(project_root, '')
-                return f'<a href="/{rel}" download>{label}</a>'
+                    return ''
+                return abs_path.replace(project_root + '/', '').replace(project_root, '')
 
-            resume_link = _web_link(app.get('resume_path', ''), '📄 Resume')
-            cl_link = _web_link(app.get('cover_letter_path', ''), '✉️ Cover Letter')
-            jd_link = _web_link(app.get('jd_file_path', ''), '📝 View JD')
+            rp = _rel(app.get('resume_path', ''))
+            resume_link = f'<a href="/download/{rp}">📄 Resume</a>' if rp else '—'
+
+            cp = _rel(app.get('cover_letter_path', ''))
+            cl_link = f'<a href="/download/{cp}">✉️ Cover Letter</a>' if cp else '—'
+
+            jd = _rel(app.get('jd_file_path', ''))
+            jd_link = f'<a href="/view/{jd}">📝 View JD</a>' if jd else '—'
 
             html += f"""
                 <tr>
