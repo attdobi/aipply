@@ -316,6 +316,7 @@ class LinkedInApplicant:
                 # Fill form fields for this step
                 self._fill_contact_info(self.page)
                 self._handle_resume_step(self.page, resume_path)
+                self._handle_cover_letter_upload(self.page, cover_letter_path)
                 self._answer_common_questions(self.page)
                 self._click_next_or_continue(self.page)
 
@@ -545,6 +546,56 @@ class LinkedInApplicant:
             resume_path: Path to the resume file to upload.
         """
         self._upload_resume(page, resume_path)
+
+    def _handle_cover_letter_upload(self, page: Page, cover_letter_path):
+        """Upload cover letter if the form has a cover letter upload section.
+
+        Args:
+            page: Playwright Page instance.
+            cover_letter_path: Path to the cover letter file.
+        """
+        if not cover_letter_path or not os.path.exists(str(cover_letter_path)):
+            return
+        try:
+            modal = page.locator('div[role="dialog"], .artdeco-modal').first
+            modal_text = (modal.text_content() or "").lower()
+            if "cover letter" not in modal_text:
+                return
+
+            # Pattern 1: Direct file input for cover letter (second file input after resume)
+            file_inputs = modal.locator('input[type="file"]').all()
+            for fi in file_inputs:
+                label = (fi.get_attribute("aria-label") or "").lower()
+                # Some LinkedIn forms label the second file input for cover letters
+                if "cover" in label:
+                    fi.set_input_files(str(cover_letter_path))
+                    time.sleep(random.uniform(2, 3))
+                    logger.debug(f"Uploaded cover letter via labeled file input")
+                    return
+
+            # Pattern 2: "Upload cover letter" button
+            cl_btn = modal.locator(
+                'button:has-text("Upload cover letter"), '
+                'label:has-text("Upload cover letter")'
+            )
+            if cl_btn.count() > 0 and cl_btn.first.is_visible():
+                with page.expect_file_chooser(timeout=5000) as fc_info:
+                    cl_btn.first.click()
+                file_chooser = fc_info.value
+                file_chooser.set_files(str(cover_letter_path))
+                time.sleep(random.uniform(2, 3))
+                logger.debug(f"Uploaded cover letter via button: {cover_letter_path}")
+                return
+
+            # Pattern 3: If there are exactly 2 file inputs, second one is likely cover letter
+            if len(file_inputs) >= 2:
+                file_inputs[1].set_input_files(str(cover_letter_path))
+                time.sleep(random.uniform(2, 3))
+                logger.debug(f"Uploaded cover letter via second file input")
+                return
+
+        except Exception as e:
+            logger.debug(f"Cover letter upload: {e}")
 
     def _upload_resume(self, page: Page, resume_path):
         """Handle resume upload step — handles multiple LinkedIn patterns.
