@@ -25,9 +25,14 @@ from src.cover_letter_gen import CoverLetterGenerator
 from src.tracker import ApplicationTracker
 from src.deslop import clean_docx
 
+STOP_FILE = Path('/Users/sacsimoto/GitHub/aipply/.stop')
+
 
 def scan_jobs(keyword="compliance manager", location="San Francisco Bay Area", limit=5):
     """Scan LinkedIn and return jobs with full descriptions."""
+    if STOP_FILE.exists():
+        print("🛑 EMERGENCY STOP — .stop file detected")
+        return []
     settings = yaml.safe_load(open('config/settings.yaml'))
     exclusions = [c.lower() for c in settings.get('exclusions', {}).get('companies', [])]
     exclusions += ['pg&e', 'pacific gas']
@@ -58,8 +63,11 @@ def scan_jobs(keyword="compliance manager", location="San Francisco Bay Area", l
 
 
 def save_application(job: dict, tailored_summary: str, competencies: list,
-                      cover_letter_text: str):
+                      cover_letter_text: str, dry_run=False):
     """Save tailored materials and track the application."""
+    if STOP_FILE.exists():
+        print("🛑 EMERGENCY STOP — .stop file detected")
+        return None
     settings = yaml.safe_load(open('config/settings.yaml'))
     profile = yaml.safe_load(open('config/profile.yaml'))
     candidate = profile.get('candidate', {})
@@ -98,11 +106,38 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
     if cl_path:
         clean_docx(cl_path)
 
+    # --- Easy Apply submission ---
+    status = 'materials_ready'
+    apply_screenshot = ''
+    if not dry_run:
+        try:
+            from src.linkedin_applicant import LinkedInApplicant
+            applicant = LinkedInApplicant(config=settings, profile=profile)
+            applicant.connect_browser()
+            apply_result = applicant.apply_to_job(
+                job={'url': url, 'title': title, 'company': company},
+                resume_path=str(resume_path),
+                cover_letter_path=str(cl_path) if cl_path else None,
+            )
+            applicant.close()
+
+            apply_status = apply_result.get('status', 'failed')
+            if apply_status == 'applied':
+                status = 'applied'
+            elif apply_result.get('reason') == 'not_easy_apply':
+                status = 'manual_needed'
+            else:
+                status = 'apply_failed'
+            apply_screenshot = apply_result.get('screenshot_path', '')
+        except Exception as e:
+            print(f"  ⚠️ Easy Apply failed: {e}")
+            status = 'apply_failed'
+
     # Track
     tracker = ApplicationTracker('output/tracker.json')
     tracker.add_application(
         company=company, position=title, job_url=url, location=location,
-        status='materials_ready',
+        status=status,
         resume_path=str(resume_path),
         cover_letter_path=str(cl_path),
         jd_file_path=str(jd_path),

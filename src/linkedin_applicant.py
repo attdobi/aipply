@@ -44,7 +44,11 @@ class LinkedInApplicant:
             cdp_url: Optional Chrome DevTools Protocol URL. If provided,
                      connects to an existing Chrome instance instead.
         """
-        self.playwright = sync_playwright().start()
+        try:
+            self.playwright = sync_playwright().start()
+        except Exception as e:
+            logger.error(f"Failed to connect browser: {e}")
+            raise RuntimeError(f"Browser connection failed: {e}")
 
         if cdp_url:
             self.browser = self.playwright.chromium.connect_over_cdp(cdp_url)
@@ -89,6 +93,19 @@ class LinkedInApplicant:
             logger.info(f"Navigating to job: {role} at {company}")
             self.page.goto(job_url, wait_until="domcontentloaded", timeout=30000)
             time.sleep(2)
+
+            # Check for CAPTCHA or security challenge
+            captcha_indicators = self.page.locator(
+                '#captcha-internal, .captcha, iframe[src*="captcha"], '
+                '[data-testid="captcha"], .challenge-dialog'
+            )
+            if captcha_indicators.count() > 0:
+                logger.warning(f"CAPTCHA detected for {role} at {company}")
+                return {
+                    "status": "failed",
+                    "reason": "captcha_detected",
+                    "screenshot_path": self._take_screenshot(self.page, job),
+                }
 
             # Check for Easy Apply button
             easy_apply_btn = self.page.locator(
