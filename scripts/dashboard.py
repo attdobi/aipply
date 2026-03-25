@@ -274,7 +274,7 @@ tr:last-child td { border-bottom: none; }
 <div class="controls" id="controlsBar">
   <div class="controls-inner">
     <button class="ctrl-btn green" id="btnStartCycle" onclick="startCycle()">🚀 Start Cycle (5 jobs)</button>
-    <button class="ctrl-btn red" id="btnStop" onclick="emergencyStop()">🛑 Emergency Stop</button>
+    <button class="ctrl-btn red" id="btnStop" onclick="stopCycle()">🛑 Stop</button>
     <button class="ctrl-btn resume" id="btnResume" onclick="resumeOps()" style="display:none">▶️ Resume</button>
     <span class="status-indicator" id="statusIndicator">🟢 Idle</span>
   </div>
@@ -448,7 +448,7 @@ function startCycle() {
     .catch(err => alert('Failed: ' + err));
 }
 
-function emergencyStop() {
+function stopCycle() {
   fetch('/api/stop', { method: 'POST' })
     .then(() => refreshStatus())
     .catch(err => alert('Failed: ' + err));
@@ -728,7 +728,7 @@ def _run_cycle_background(cycle_id, keyword, location, limit):
         for i, job in enumerate(jobs):
             # Check stop file before each application
             if STOP_FILE.exists():
-                print(f"🛑 Cycle {cycle_id} halted by emergency stop after {i} jobs")
+                print(f"🛑 Cycle {cycle_id} halted by stop after {i} jobs")
                 break
 
             try:
