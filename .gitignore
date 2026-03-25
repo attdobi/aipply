@@ -3,11 +3,11 @@ __pycache__/
 .env
 .venv/
 venv/
-output/applications/
-output/reports/
-output/tracker.json
+output/
 templates/base_resume.docx
 templates/base_cover_letter.docx
+config/profile.yaml
+config/settings.yaml
 *.egg-info/
 dist/
 build/

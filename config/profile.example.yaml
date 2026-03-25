@@ -1,0 +1,22 @@
+# Aipply - Candidate Profile
+# Copy this to profile.yaml and fill in your details
+
+candidate:
+  name: "Your Name"
+  email: "your.email@example.com"
+  phone: ""
+  linkedin_url: ""
+  location: "Your City / Metro Area"
+
+  summary: |
+    Brief professional summary for AI to reference when tailoring materials.
+
+  strengths:
+    - Skill 1
+    - Skill 2
+    - Skill 3
+
+  target_roles:
+    - "Target Role 1"
+    - "Target Role 2"
+    - "Target Role 3"

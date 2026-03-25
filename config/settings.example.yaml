@@ -1,0 +1,32 @@
+# Aipply - Job Search Settings
+# Copy this to settings.yaml and customize for your search
+
+search:
+  keywords:
+    - "your keyword 1"
+    - "your keyword 2"
+  locations:
+    - "San Francisco Bay Area"
+    - "Remote"
+  experience_levels:
+    - "Mid-Senior level"
+    - "Director"
+    - "Associate"
+  job_types:
+    - "Full-time"
+
+exclusions:
+  companies:
+    - "Your Current Employer"
+
+application:
+  email: "your.email@example.com"
+  auto_apply: true
+  max_applications_per_cycle: 10
+
+schedule:
+  interval_hours: 1
+
+openai:
+  model: "gpt-4"
+  temperature: 0.7
