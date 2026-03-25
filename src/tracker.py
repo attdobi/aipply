@@ -49,8 +49,14 @@ class ApplicationTracker:
         screenshots: list = None,
     ) -> dict:
         """Record a new job application."""
-        # Normalize position: collapse newlines/whitespace into single spaces
+        # Normalize position: collapse newlines/whitespace, de-duplicate LinkedIn repeats
         position = " ".join(position.strip().split())
+        # Handle LinkedIn artifact where title is duplicated (e.g. "Analyst\nAnalyst")
+        words = position.split()
+        if len(words) >= 2 and len(words) % 2 == 0:
+            half = len(words) // 2
+            if [w.lower() for w in words[:half]] == [w.lower() for w in words[half:]]:
+                position = " ".join(words[:half])
 
         # Convert all paths to absolute for file:// links
         if resume_path:
@@ -102,8 +108,16 @@ class ApplicationTracker:
         """Check if we've already applied (by URL, job ID, or normalized company+position)."""
 
         def norm(s: str) -> str:
-            """Normalize: strip, collapse whitespace, lowercase."""
-            return " ".join(s.lower().strip().split())
+            """Normalize: strip, collapse whitespace, lowercase, de-duplicate LinkedIn title repeats."""
+            cleaned = " ".join(s.lower().strip().split())
+            # Handle LinkedIn artifact where title is duplicated (e.g. "Analyst\nAnalyst" → "analyst analyst")
+            # Split in half and check if both halves are identical
+            words = cleaned.split()
+            if len(words) >= 2 and len(words) % 2 == 0:
+                half = len(words) // 2
+                if words[:half] == words[half:]:
+                    cleaned = " ".join(words[:half])
+            return cleaned
 
         for a in self.applications:
             # Exact URL match
