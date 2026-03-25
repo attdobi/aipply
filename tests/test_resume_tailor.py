@@ -1,172 +1,280 @@
-"""Tests for resume tailor module."""
+"""Tests for resume tailor module.
+
+Tests the actual ResumeTailor functionality — no OpenAI mocks needed
+since the module now does surgical .docx replacement without API calls.
+"""
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from docx import Document
 
-
-@pytest.fixture
-def mock_openai():
-    """Mock the OpenAI client before ResumeTailor is instantiated."""
-    with patch("src.resume_tailor.OpenAI") as mock_cls:
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        yield mock_client
+from src.resume_tailor import ResumeTailor
 
 
 @pytest.fixture
-def tailor(mock_openai):
-    """Create a ResumeTailor with test config and mocked OpenAI."""
-    from src.resume_tailor import ResumeTailor
-
-    config = {
-        "openai": {
-            "model": "gpt-4",
-            "temperature": 0.7,
-        }
-    }
-    return ResumeTailor(config=config)
-
-
-@pytest.fixture
-def tailor_no_config(mock_openai):
-    """Create a ResumeTailor with no config."""
-    from src.resume_tailor import ResumeTailor
-
+def tailor():
+    """Create a ResumeTailor with default config."""
     return ResumeTailor()
 
 
+@pytest.fixture
+def tailor_with_config():
+    """Create a ResumeTailor with custom config."""
+    return ResumeTailor(config={"some_key": "some_value"})
+
+
+@pytest.fixture
+def base_resume(tmp_path):
+    """Create a realistic base resume .docx with sections."""
+    doc = Document()
+    doc.add_paragraph("Jane Doe")
+    doc.add_paragraph("jane@example.com | 555-123-4567")
+    doc.add_paragraph("")
+
+    doc.add_paragraph("Professional Summary")
+    doc.add_paragraph(
+        "Experienced compliance professional with 9+ years in "
+        "regulatory oversight, risk management, and audit."
+    )
+    doc.add_paragraph("")
+
+    doc.add_paragraph("Core Competencies")
+    doc.add_paragraph("• Regulatory Compliance")
+    doc.add_paragraph("• Risk Assessment")
+    doc.add_paragraph("• Internal Audit")
+    doc.add_paragraph("• BSA/AML")
+    doc.add_paragraph("")
+
+    doc.add_paragraph("Professional Experience")
+    doc.add_paragraph("OCC — Bank Examiner — 2016-2023")
+    doc.add_paragraph("Led compliance examinations of national banks.")
+    doc.add_paragraph("")
+
+    doc.add_paragraph("Education")
+    doc.add_paragraph("B.S. Finance — University of California")
+
+    path = tmp_path / "base_resume.docx"
+    doc.save(str(path))
+    return path
+
+
 class TestResumeTailorInit:
-    def test_init_with_config(self, tailor):
-        assert tailor.config is not None
-        assert "openai" in tailor.config
-        assert tailor.model == "gpt-4"
-        assert tailor.temperature == 0.7
+    def test_init_with_config(self, tailor_with_config):
+        assert tailor_with_config.config == {"some_key": "some_value"}
 
-    def test_init_default_config(self, tailor_no_config):
-        assert tailor_no_config.config == {}
-        # Should use default model
-        assert tailor_no_config.model == "gpt-4"
+    def test_init_default_config(self, tailor):
+        assert tailor.config == {}
 
-    def test_init_none_config(self, mock_openai):
-        from src.resume_tailor import ResumeTailor
-
+    def test_init_none_config(self):
         t = ResumeTailor(config=None)
         assert t.config == {}
 
 
-class TestReadBaseResume:
-    def test_read_base_resume_docx(self, tailor, tmp_path):
-        """Test that a .docx file can be read and returns text."""
-        doc = Document()
-        doc.add_paragraph("Test resume content for compliance manager.")
-        doc.add_paragraph("Experience in regulatory oversight.")
-        docx_path = tmp_path / "test_resume.docx"
-        doc.save(str(docx_path))
-
-        text = tailor.read_base_resume(docx_path)
+class TestReadResumeText:
+    def test_reads_content_correctly(self, base_resume):
+        """read_resume_text should return all non-empty paragraph text."""
+        text = ResumeTailor.read_resume_text(base_resume)
         assert isinstance(text, str)
-        assert "compliance" in text.lower()
-        assert "regulatory" in text.lower()
+        assert "Jane Doe" in text
+        assert "Professional Summary" in text
+        assert "Regulatory Compliance" in text
+        assert "Bank Examiner" in text
 
-    def test_read_base_resume_file_not_found(self, tailor, tmp_path):
-        """Should raise FileNotFoundError for missing file."""
-        with pytest.raises(FileNotFoundError):
-            tailor.read_base_resume(tmp_path / "nonexistent.docx")
-
-
-class TestTailorResume:
-    def test_tailor_resume_returns_string(self, tailor, mock_openai, tmp_path):
-        """tailor_resume should return tailored string content."""
-        # Create a base resume docx
+    def test_reads_simple_docx(self, tmp_path):
+        """read_resume_text should handle a simple single-paragraph docx."""
         doc = Document()
-        doc.add_paragraph("Jane Doe - Compliance Professional")
-        base_path = tmp_path / "resume.docx"
-        doc.save(str(base_path))
+        doc.add_paragraph("Simple content.")
+        path = tmp_path / "simple.docx"
+        doc.save(str(path))
 
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = (
-            "JANE DOE\n\nSUMMARY\nExperienced compliance professional.\n\n"
-            "EXPERIENCE\n- Led regulatory compliance team"
+        text = ResumeTailor.read_resume_text(path)
+        assert "Simple content." in text
+
+    def test_skips_blank_paragraphs(self, tmp_path):
+        """read_resume_text should skip blank/whitespace-only paragraphs."""
+        doc = Document()
+        doc.add_paragraph("Content A")
+        doc.add_paragraph("")
+        doc.add_paragraph("   ")
+        doc.add_paragraph("Content B")
+        path = tmp_path / "blanks.docx"
+        doc.save(str(path))
+
+        text = ResumeTailor.read_resume_text(path)
+        lines = text.split("\n")
+        assert len(lines) == 2
+        assert "Content A" in lines[0]
+        assert "Content B" in lines[1]
+
+
+class TestCloneAndTailor:
+    def test_replaces_summary(self, base_resume, tmp_path):
+        """clone_and_tailor should replace the Professional Summary text."""
+        output_path = tmp_path / "tailored.docx"
+        new_summary = "Tailored summary for compliance role at Acme Corp."
+
+        result = ResumeTailor.clone_and_tailor(
+            base_path=base_resume,
+            output_path=output_path,
+            new_summary=new_summary,
         )
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        result = tailor.tailor_resume(base_path, "Compliance manager role", "Acme", "Manager")
-        assert isinstance(result, str)
-        assert "JANE DOE" in result
-
-    def test_tailor_resume_calls_openai(self, tailor, mock_openai, tmp_path):
-        """tailor_resume should call OpenAI chat completions."""
-        doc = Document()
-        doc.add_paragraph("Resume content")
-        base_path = tmp_path / "resume.docx"
-        doc.save(str(base_path))
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Tailored content"
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        tailor.tailor_resume(base_path, "Job desc")
-        mock_openai.chat.completions.create.assert_called_once()
-
-
-class TestSaveTailoredResume:
-    def test_save_tailored_resume_creates_docx(self, tailor, tmp_path):
-        """save_tailored_resume should create a valid .docx file."""
-        output_path = tmp_path / "tailored_resume.docx"
-        content = "JANE DOE\n\nSUMMARY\nCompliance professional.\n\n- Risk management\n- Audit oversight"
-
-        result = tailor.save_tailored_resume(content, output_path)
         assert result == output_path
         assert output_path.exists()
 
         doc = Document(str(output_path))
-        assert len(doc.paragraphs) >= 1
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert new_summary in full_text
+        # Original summary should be gone
+        assert "9+ years in regulatory oversight" not in full_text
 
-    def test_save_creates_parent_dirs(self, tailor, tmp_path):
-        """save_tailored_resume should create parent directories."""
-        output_path = tmp_path / "sub" / "dir" / "resume.docx"
-        content = "Resume content"
+    def test_replaces_competencies(self, base_resume, tmp_path):
+        """clone_and_tailor should replace bullet-pointed competencies."""
+        output_path = tmp_path / "tailored.docx"
+        new_competencies = [
+            "Anti-Money Laundering",
+            "Fraud Detection",
+            "SOX Compliance",
+            "Vendor Risk Management",
+        ]
 
-        result = tailor.save_tailored_resume(content, output_path)
+        result = ResumeTailor.clone_and_tailor(
+            base_path=base_resume,
+            output_path=output_path,
+            new_competencies=new_competencies,
+        )
+        assert output_path.exists()
+
+        doc = Document(str(output_path))
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Anti-Money Laundering" in full_text
+        assert "Fraud Detection" in full_text
+        assert "SOX Compliance" in full_text
+        assert "Vendor Risk Management" in full_text
+
+    def test_replaces_both_summary_and_competencies(self, base_resume, tmp_path):
+        """clone_and_tailor should replace both summary and competencies."""
+        output_path = tmp_path / "both.docx"
+        new_summary = "Tailored for fintech compliance."
+        new_competencies = ["FinTech Reg", "Crypto Compliance"]
+
+        ResumeTailor.clone_and_tailor(
+            base_path=base_resume,
+            output_path=output_path,
+            new_summary=new_summary,
+            new_competencies=new_competencies,
+        )
+
+        doc = Document(str(output_path))
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert new_summary in full_text
+        assert "FinTech Reg" in full_text
+        assert "Crypto Compliance" in full_text
+
+    def test_preserves_other_sections(self, base_resume, tmp_path):
+        """clone_and_tailor should NOT modify Professional Experience or Education."""
+        output_path = tmp_path / "preserved.docx"
+
+        ResumeTailor.clone_and_tailor(
+            base_path=base_resume,
+            output_path=output_path,
+            new_summary="New summary text.",
+        )
+
+        doc = Document(str(output_path))
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Bank Examiner" in full_text
+        assert "B.S. Finance" in full_text
+
+    def test_no_changes_when_none_provided(self, base_resume, tmp_path):
+        """clone_and_tailor with no new_summary or new_competencies should clone as-is."""
+        output_path = tmp_path / "clone.docx"
+
+        ResumeTailor.clone_and_tailor(
+            base_path=base_resume,
+            output_path=output_path,
+        )
+        assert output_path.exists()
+
+        # Content should match original
+        original_text = ResumeTailor.read_resume_text(base_resume)
+        cloned_text = ResumeTailor.read_resume_text(output_path)
+        assert original_text == cloned_text
+
+    def test_creates_parent_dirs(self, base_resume, tmp_path):
+        """clone_and_tailor should create parent directories if needed."""
+        output_path = tmp_path / "sub" / "dir" / "tailored.docx"
+
+        ResumeTailor.clone_and_tailor(
+            base_path=base_resume,
+            output_path=output_path,
+            new_summary="Nested output test.",
+        )
         assert output_path.exists()
 
 
 class TestTailorAndSave:
-    def test_tailor_and_save_end_to_end(self, tailor, mock_openai, tmp_path):
-        """End-to-end test: tailor_and_save produces a .docx file."""
-        # Create base resume
-        doc = Document()
-        doc.add_paragraph("Base resume content for compliance role")
-        base_path = tmp_path / "base_resume.docx"
-        doc.save(str(base_path))
-
+    def test_produces_docx_file(self, tailor, base_resume, tmp_path):
+        """tailor_and_save should produce a .docx file in the output directory."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir()
-
-        # Mock OpenAI response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = (
-            "Jane Doe\n\nSUMMARY\nTailored for compliance role at Acme."
-        )
-        mock_openai.chat.completions.create.return_value = mock_response
 
         result = tailor.tailor_and_save(
-            base_resume_path=base_path,
-            job_description="Compliance manager needed",
-            company="Acme",
+            base_resume_path=base_resume,
+            new_summary="Tailored for compliance role.",
+            new_competencies=["AML", "BSA", "Fraud"],
+            company="Acme Corp",
             role="Compliance Manager",
             output_dir=output_dir,
         )
         assert Path(result).exists()
         assert str(result).endswith(".docx")
 
-        # Verify it's a valid docx
-        doc2 = Document(str(result))
-        assert len(doc2.paragraphs) >= 1
+    def test_filename_pattern(self, tailor, base_resume, tmp_path):
+        """Output filename should contain 'Danna_Dobi_Resume' and role."""
+        output_dir = tmp_path / "output"
+
+        result = tailor.tailor_and_save(
+            base_resume_path=base_resume,
+            new_summary="Summary",
+            new_competencies=["Skill"],
+            company="Co",
+            role="Risk Analyst",
+            output_dir=output_dir,
+        )
+        filename = Path(result).name
+        assert "Danna_Dobi_Resume" in filename
+        assert "Risk_Analyst" in filename
+        assert filename.endswith(".docx")
+
+    def test_content_is_tailored(self, tailor, base_resume, tmp_path):
+        """The generated .docx should contain the tailored content."""
+        output_dir = tmp_path / "output"
+
+        result = tailor.tailor_and_save(
+            base_resume_path=base_resume,
+            new_summary="Expert in fintech compliance and crypto regulation.",
+            new_competencies=["Crypto AML", "DeFi Risk"],
+            company="CoinBase",
+            role="Compliance Lead",
+            output_dir=output_dir,
+        )
+
+        doc = Document(str(result))
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "fintech compliance" in full_text
+        assert "Crypto AML" in full_text
+
+    def test_creates_output_dir(self, tailor, base_resume, tmp_path):
+        """tailor_and_save should create the output directory if it doesn't exist."""
+        output_dir = tmp_path / "nonexistent" / "nested"
+
+        result = tailor.tailor_and_save(
+            base_resume_path=base_resume,
+            new_summary="S",
+            new_competencies=[],
+            company="Co",
+            role="Role",
+            output_dir=output_dir,
+        )
+        assert Path(result).exists()
+        assert output_dir.exists()
