@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+output/applications/
+output/reports/
+output/tracker.json
+templates/base_resume.docx
+templates/base_cover_letter.docx
+*.egg-info/
+dist/
+build/
+.pytest_cache/

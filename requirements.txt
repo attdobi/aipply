@@ -1,0 +1,22 @@
+# Core
+playwright>=1.40.0
+selenium>=4.15.0
+openai>=1.6.0
+
+# Document processing
+python-docx>=1.1.0
+openpyxl>=3.1.2
+
+# Config
+pyyaml>=6.0.1
+
+# Web/HTML reports
+jinja2>=3.1.2
+
+# Data
+pandas>=2.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+rich>=13.7.0
+schedule>=1.2.0

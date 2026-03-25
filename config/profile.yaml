@@ -1,0 +1,26 @@
+# Aipply - Candidate Profile
+
+candidate:
+  name: "Danna Dobi"
+  email: "danna.dobi@gmail.com"
+  phone: ""  # Fill in
+  linkedin_url: ""  # Fill in
+  location: "San Francisco Bay Area"
+
+  summary: |
+    Experienced compliance, risk, and governance professional.
+
+  strengths:
+    - Regulatory compliance
+    - Risk management
+    - Audit oversight
+    - Corporate governance
+    - Policy development
+
+  target_roles:
+    - Compliance Manager
+    - Risk Manager
+    - Audit Manager
+    - Compliance Officer
+    - Governance Analyst
+    - Senior Compliance Analyst

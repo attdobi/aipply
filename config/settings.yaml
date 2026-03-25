@@ -1,0 +1,40 @@
+# Aipply - Job Search Settings
+
+search:
+  keywords:
+    - compliance
+    - audit
+    - risk
+    - governance
+    - "compliance manager"
+    - "risk manager"
+    - "audit manager"
+    - "compliance officer"
+    - "governance analyst"
+  locations:
+    - "San Francisco Bay Area"
+    - "Remote"
+  experience_levels:
+    - "Mid-Senior level"
+    - "Director"
+    - "Associate"
+  job_types:
+    - "Full-time"
+
+exclusions:
+  companies:
+    - "PG&E"
+    - "Pacific Gas and Electric"
+    - "Pacific Gas & Electric"
+
+application:
+  email: "danna.dobi@gmail.com"
+  auto_apply: true
+  max_applications_per_cycle: 10
+
+schedule:
+  interval_hours: 1
+
+openai:
+  model: "gpt-4"
+  temperature: 0.7
