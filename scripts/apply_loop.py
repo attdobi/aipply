@@ -49,12 +49,6 @@ BASE_RESUME = PROJECT_ROOT / "templates" / "base_resume.docx"
 LOG_FILE = PROJECT_ROOT / "output" / "apply_loop.log"
 
 SEARCH_KEYWORDS = [
-    # Company-targeted searches first (highest priority)
-    "compliance Salesforce",
-    "compliance OpenAI",
-    "risk analyst Salesforce",
-    "risk analyst OpenAI",
-    # General searches
     "compliance analyst",
     "risk analyst",
     "audit analyst",
@@ -63,13 +57,6 @@ SEARCH_KEYWORDS = [
     "compliance specialist",
     "fraud analyst",
     "governance analyst",
-]
-
-# Priority companies — if a job matches one of these, process it first
-PRIORITY_COMPANIES = [
-    "salesforce",
-    "openai",
-    "open ai",
 ]
 
 SEARCH_LOCATIONS = [
