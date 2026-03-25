@@ -88,190 +88,10 @@ def should_stop() -> bool:
     return STOP_FILE.exists()
 
 
-def tailor_summary_local(company, title, description):
-    """Generate tailored professional summary based on JD keywords."""
-    desc_lower = description.lower()
 
-    themes = []
-    if any(w in desc_lower for w in ["aml", "anti-money laundering", "bsa", "bank secrecy"]):
-        themes.append("aml_bsa")
-    if any(w in desc_lower for w in ["fraud", "investigation", "suspicious activity"]):
-        themes.append("fraud")
-    if any(w in desc_lower for w in ["risk assessment", "risk management", "enterprise risk"]):
-        themes.append("risk")
-    if any(w in desc_lower for w in ["audit", "internal audit", "testing"]):
-        themes.append("audit")
-    if any(w in desc_lower for w in ["fintech", "digital banking", "financial technology"]):
-        themes.append("fintech")
-    if any(w in desc_lower for w in ["regulatory", "examination", "regulator", "occ", "fdic", "cfpb"]):
-        themes.append("regulatory")
-    if any(w in desc_lower for w in ["compliance monitoring", "monitoring program"]):
-        themes.append("monitoring")
-    if any(w in desc_lower for w in ["governance", "policy", "controls"]):
-        themes.append("governance")
-
-    base = (
-        "Compliance professional with 9+ years of experience, including over four years "
-        "as a federal bank examiner with the Office of the Comptroller of the Currency (OCC). "
-        "That background means walking into any compliance environment with a regulator's eye: "
-        "knowing what examiners look for, how monitoring programs get evaluated, "
-        "and what makes documentation hold up."
-    )
-
-    if "aml_bsa" in themes or "fraud" in themes:
-        middle = (
-            " Since leaving the OCC, hands-on roles in fintech and banking have focused on "
-            "compliance monitoring, fraud risk assessment, and BSA/AML program oversight, "
-            "including transaction monitoring, suspicious activity reporting, and regulatory "
-            "exam preparation."
-        )
-    elif "risk" in themes:
-        middle = (
-            " Since leaving the OCC, hands-on roles in fintech and banking have centered on "
-            "risk assessment, compliance testing, and controls evaluation, with direct experience "
-            "identifying emerging risk patterns, documenting findings, and keeping governance "
-            "artifacts exam-ready."
-        )
-    elif "fintech" in themes:
-        middle = (
-            " Since leaving the OCC, hands-on roles at fintech-bank partnerships and digital "
-            "banking institutions have focused on compliance monitoring, audit program management, "
-            "and keeping governance artifacts exam-ready in fast-moving regulatory environments."
-        )
-    elif "audit" in themes:
-        middle = (
-            " Since leaving the OCC, hands-on roles in fintech and banking have focused on "
-            "audit program management, compliance testing, and remediation validation, "
-            "with a track record of keeping documentation in exam-ready condition."
-        )
-    else:
-        middle = (
-            " Since leaving the OCC, hands-on roles in fintech and banking have focused on "
-            "compliance monitoring, reviewing customer-facing communications and marketing materials, "
-            "validating remediation, and keeping governance artifacts exam-ready."
-        )
-
-    closing = (
-        " Known for taking full ownership of assigned work and translating complex findings "
-        "into summaries leadership can use."
-    )
-
-    return base + middle + closing
-
-
-def tailor_competencies_local(description):
-    """Reorder core competencies based on JD."""
-    desc_lower = description.lower()
-
-    all_comps = [
-        "Compliance Monitoring & Validation Execution",
-        "Customer-Facing Channel Reviews (Communications, Marketing, Sales Practices)",
-        "Findings Documentation, Classification & Escalation",
-        "Remediation Follow-Up Testing & Confirmation Reviews",
-        "Issue Intake, Tracking & Management",
-        "Audit-Ready Evidence Preparation",
-        "Regulatory Exam Support",
-        "Policy Lifecycle Management",
-        "Internal Controls & Testing",
-        "Process Improvement & Documentation Quality",
-    ]
-
-    extras = {
-        "aml": "BSA/AML Compliance & Transaction Monitoring",
-        "fraud": "Fraud Risk Assessment & Investigation Support",
-        "risk assessment": "Risk Assessment & Controls Evaluation",
-        "governance": "Corporate Governance & Regulatory Reporting",
-        "fintech": "Fintech & Digital Banking Compliance",
-        "data analysis": "Data Analysis & Trend Identification",
-        "third party": "Third-Party Risk Oversight",
-        "vendor": "Third-Party Risk Oversight",
-    }
-
-    selected = []
-    used = set()
-
-    for keyword, comp in extras.items():
-        if keyword in desc_lower and comp not in used and len(selected) < 2:
-            selected.append(comp)
-            used.add(comp)
-
-    scored = []
-    for comp in all_comps:
-        score = sum(1 for word in comp.lower().split() if len(word) > 3 and word in desc_lower)
-        scored.append((score, comp))
-    scored.sort(key=lambda x: -x[0])
-
-    for _, comp in scored:
-        if comp not in used and len(selected) < 10:
-            selected.append(comp)
-            used.add(comp)
-
-    return selected[:10]
-
-
-def generate_cover_letter_local(company, title, description):
-    """Generate tailored cover letter text."""
-    desc_lower = description.lower()
-
-    highlights = []
-    if any(w in desc_lower for w in ["aml", "bsa", "anti-money laundering"]):
-        highlights.append("BSA/AML compliance and transaction monitoring")
-    if any(w in desc_lower for w in ["risk assessment", "risk management"]):
-        highlights.append("risk assessment and controls evaluation")
-    if any(w in desc_lower for w in ["audit", "testing", "quality control"]):
-        highlights.append("audit program management and compliance testing")
-    if any(w in desc_lower for w in ["regulatory", "examination", "examiner"]):
-        highlights.append("regulatory examination support and exam-readiness")
-    if any(w in desc_lower for w in ["monitoring", "surveillance"]):
-        highlights.append("compliance monitoring and validation")
-    if any(w in desc_lower for w in ["fraud", "investigation"]):
-        highlights.append("fraud detection and investigation support")
-    if any(w in desc_lower for w in ["governance", "policy"]):
-        highlights.append("governance reporting and policy management")
-    if any(w in desc_lower for w in ["fintech", "digital banking"]):
-        highlights.append("fintech and digital banking compliance")
-    if any(w in desc_lower for w in ["remediation", "corrective action"]):
-        highlights.append("remediation tracking and confirmation testing")
-    if any(w in desc_lower for w in ["documentation", "reporting"]):
-        highlights.append("findings documentation and regulatory reporting")
-
-    if not highlights:
-        highlights = ["compliance monitoring and validation", "regulatory exam support"]
-
-    highlights = highlights[:3]
-
-    today = datetime.now().strftime("%B %d, %Y")
-
-    letter = f"""{today}
-
-Dear Hiring Manager,
-
-I'm writing to apply for the {title} position at {company}. With 9+ years of compliance experience, including four years as a federal bank examiner with the OCC and subsequent roles in fintech and banking, I bring a practical understanding of what regulators expect and how to build programs that hold up under scrutiny.
-
-My background maps directly to what this role requires. At the OCC, I conducted safety-and-soundness and compliance examinations of nationally chartered banks, covering {highlights[0]}. That examiner perspective carries into every role since: at Cross River Bank, I led compliance and operational risk audits; at Prime Trust, I managed audit and compliance monitoring programs across fintech operations.
-
-"""
-    if len(highlights) > 1:
-        letter += (
-            f"What I'd bring to {company} is hands-on experience in {highlights[1]}, "
-            f"combined with the ability to translate complex findings into clear, actionable write-ups. "
-        )
-
-    if len(highlights) > 2:
-        letter += (
-            f"I also have direct experience with {highlights[2]}, "
-            f"which I understand is central to this role. "
-        )
-
-    letter += f"""I hold both a CFE and CAMS certification, and my work consistently focuses on making compliance programs practical, well-documented, and ready for whatever questions come next.
-
-I'd welcome the chance to discuss how my background fits what {company} is building.
-
-Thank you for your time.
-
-Best regards,"""
-
-    return letter
+# Tailoring functions are now in src/ modules:
+# - ResumeTailor.tailor_summary() / ResumeTailor.tailor_competencies()
+# - CoverLetterGenerator.generate_text()
 
 
 def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
@@ -454,8 +274,8 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
         jd_path.write_text(description or "No description available", encoding="utf-8")
 
         # Tailor resume
-        new_summary = tailor_summary_local(company_text, title_text, description)
-        new_comps = tailor_competencies_local(description)
+        new_summary = ResumeTailor.tailor_summary(company_text, title_text, description)
+        new_comps = ResumeTailor.tailor_competencies(description)
 
         resume_path = tailor.tailor_and_save(
             base_resume_path=str(BASE_RESUME),
@@ -469,7 +289,7 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
         logger.info(f"  Resume: {resume_path}")
 
         # Generate cover letter
-        cl_text = generate_cover_letter_local(company_text, title_text, description)
+        cl_text = CoverLetterGenerator.generate_text(company_text, title_text, description)
         cl_path = cl_gen.generate_and_save(
             text=cl_text,
             candidate_profile=CANDIDATE,

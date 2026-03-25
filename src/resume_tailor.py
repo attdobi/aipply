@@ -81,6 +81,127 @@ class ResumeTailor:
         logger.info("Saved tailored resume to %s", output_path)
         return output_path
 
+    @staticmethod
+    def tailor_summary(company: str, title: str, description: str) -> str:
+        """Generate tailored professional summary based on JD keywords."""
+        desc_lower = description.lower()
+
+        themes = []
+        if any(w in desc_lower for w in ["aml", "anti-money laundering", "bsa", "bank secrecy"]):
+            themes.append("aml_bsa")
+        if any(w in desc_lower for w in ["fraud", "investigation", "suspicious activity"]):
+            themes.append("fraud")
+        if any(w in desc_lower for w in ["risk assessment", "risk management", "enterprise risk"]):
+            themes.append("risk")
+        if any(w in desc_lower for w in ["audit", "internal audit", "testing"]):
+            themes.append("audit")
+        if any(w in desc_lower for w in ["fintech", "digital banking", "financial technology"]):
+            themes.append("fintech")
+        if any(w in desc_lower for w in ["regulatory", "examination", "regulator", "occ", "fdic", "cfpb"]):
+            themes.append("regulatory")
+        if any(w in desc_lower for w in ["compliance monitoring", "monitoring program"]):
+            themes.append("monitoring")
+        if any(w in desc_lower for w in ["governance", "policy", "controls"]):
+            themes.append("governance")
+
+        base = (
+            "Compliance professional with 9+ years of experience, including over four years "
+            "as a federal bank examiner with the Office of the Comptroller of the Currency (OCC). "
+            "That background means walking into any compliance environment with a regulator's eye: "
+            "knowing what examiners look for, how monitoring programs get evaluated, "
+            "and what makes documentation hold up."
+        )
+
+        if "aml_bsa" in themes or "fraud" in themes:
+            middle = (
+                " Since leaving the OCC, hands-on roles in fintech and banking have focused on "
+                "compliance monitoring, fraud risk assessment, and BSA/AML program oversight, "
+                "including transaction monitoring, suspicious activity reporting, and regulatory "
+                "exam preparation."
+            )
+        elif "risk" in themes:
+            middle = (
+                " Since leaving the OCC, hands-on roles in fintech and banking have centered on "
+                "risk assessment, compliance testing, and controls evaluation, with direct experience "
+                "identifying emerging risk patterns, documenting findings, and keeping governance "
+                "artifacts exam-ready."
+            )
+        elif "fintech" in themes:
+            middle = (
+                " Since leaving the OCC, hands-on roles at fintech-bank partnerships and digital "
+                "banking institutions have focused on compliance monitoring, audit program management, "
+                "and keeping governance artifacts exam-ready in fast-moving regulatory environments."
+            )
+        elif "audit" in themes:
+            middle = (
+                " Since leaving the OCC, hands-on roles in fintech and banking have focused on "
+                "audit program management, compliance testing, and remediation validation, "
+                "with a track record of keeping documentation in exam-ready condition."
+            )
+        else:
+            middle = (
+                " Since leaving the OCC, hands-on roles in fintech and banking have focused on "
+                "compliance monitoring, reviewing customer-facing communications and marketing materials, "
+                "validating remediation, and keeping governance artifacts exam-ready."
+            )
+
+        closing = (
+            " Known for taking full ownership of assigned work and translating complex findings "
+            "into summaries leadership can use."
+        )
+
+        return base + middle + closing
+
+    @staticmethod
+    def tailor_competencies(description: str) -> list[str]:
+        """Reorder core competencies based on JD."""
+        desc_lower = description.lower()
+
+        all_comps = [
+            "Compliance Monitoring & Validation Execution",
+            "Customer-Facing Channel Reviews (Communications, Marketing, Sales Practices)",
+            "Findings Documentation, Classification & Escalation",
+            "Remediation Follow-Up Testing & Confirmation Reviews",
+            "Issue Intake, Tracking & Management",
+            "Audit-Ready Evidence Preparation",
+            "Regulatory Exam Support",
+            "Policy Lifecycle Management",
+            "Internal Controls & Testing",
+            "Process Improvement & Documentation Quality",
+        ]
+
+        extras = {
+            "aml": "BSA/AML Compliance & Transaction Monitoring",
+            "fraud": "Fraud Risk Assessment & Investigation Support",
+            "risk assessment": "Risk Assessment & Controls Evaluation",
+            "governance": "Corporate Governance & Regulatory Reporting",
+            "fintech": "Fintech & Digital Banking Compliance",
+            "data analysis": "Data Analysis & Trend Identification",
+            "third party": "Third-Party Risk Oversight",
+            "vendor": "Third-Party Risk Oversight",
+        }
+
+        selected = []
+        used = set()
+
+        for keyword, comp in extras.items():
+            if keyword in desc_lower and comp not in used and len(selected) < 2:
+                selected.append(comp)
+                used.add(comp)
+
+        scored = []
+        for comp in all_comps:
+            score = sum(1 for word in comp.lower().split() if len(word) > 3 and word in desc_lower)
+            scored.append((score, comp))
+        scored.sort(key=lambda x: -x[0])
+
+        for _, comp in scored:
+            if comp not in used and len(selected) < 10:
+                selected.append(comp)
+                used.add(comp)
+
+        return selected[:10]
+
     def tailor_and_save(self, base_resume_path: str | Path,
                          new_summary: str, new_competencies: list[str],
                          company: str, role: str,

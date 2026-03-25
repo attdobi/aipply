@@ -24,6 +24,73 @@ class CoverLetterGenerator:
         self.config = config or {}
 
     @staticmethod
+    def generate_text(company: str, title: str, description: str) -> str:
+        """Generate tailored cover letter text."""
+        from datetime import datetime
+
+        desc_lower = description.lower()
+
+        highlights = []
+        if any(w in desc_lower for w in ["aml", "bsa", "anti-money laundering"]):
+            highlights.append("BSA/AML compliance and transaction monitoring")
+        if any(w in desc_lower for w in ["risk assessment", "risk management"]):
+            highlights.append("risk assessment and controls evaluation")
+        if any(w in desc_lower for w in ["audit", "testing", "quality control"]):
+            highlights.append("audit program management and compliance testing")
+        if any(w in desc_lower for w in ["regulatory", "examination", "examiner"]):
+            highlights.append("regulatory examination support and exam-readiness")
+        if any(w in desc_lower for w in ["monitoring", "surveillance"]):
+            highlights.append("compliance monitoring and validation")
+        if any(w in desc_lower for w in ["fraud", "investigation"]):
+            highlights.append("fraud detection and investigation support")
+        if any(w in desc_lower for w in ["governance", "policy"]):
+            highlights.append("governance reporting and policy management")
+        if any(w in desc_lower for w in ["fintech", "digital banking"]):
+            highlights.append("fintech and digital banking compliance")
+        if any(w in desc_lower for w in ["remediation", "corrective action"]):
+            highlights.append("remediation tracking and confirmation testing")
+        if any(w in desc_lower for w in ["documentation", "reporting"]):
+            highlights.append("findings documentation and regulatory reporting")
+
+        if not highlights:
+            highlights = ["compliance monitoring and validation", "regulatory exam support"]
+
+        highlights = highlights[:3]
+
+        today = datetime.now().strftime("%B %d, %Y")
+
+        letter = f"""{today}
+
+Dear Hiring Manager,
+
+I'm writing to apply for the {title} position at {company}. With 9+ years of compliance experience, including four years as a federal bank examiner with the OCC and subsequent roles in fintech and banking, I bring a practical understanding of what regulators expect and how to build programs that hold up under scrutiny.
+
+My background maps directly to what this role requires. At the OCC, I conducted safety-and-soundness and compliance examinations of nationally chartered banks, covering {highlights[0]}. That examiner perspective carries into every role since: at Cross River Bank, I led compliance and operational risk audits; at Prime Trust, I managed audit and compliance monitoring programs across fintech operations.
+
+"""
+        if len(highlights) > 1:
+            letter += (
+                f"What I'd bring to {company} is hands-on experience in {highlights[1]}, "
+                f"combined with the ability to translate complex findings into clear, actionable write-ups. "
+            )
+
+        if len(highlights) > 2:
+            letter += (
+                f"I also have direct experience with {highlights[2]}, "
+                f"which I understand is central to this role. "
+            )
+
+        letter += f"""I hold both a CFE and CAMS certification, and my work consistently focuses on making compliance programs practical, well-documented, and ready for whatever questions come next.
+
+I'd welcome the chance to discuss how my background fits what {company} is building.
+
+Thank you for your time.
+
+Best regards,"""
+
+        return letter
+
+    @staticmethod
     def read_example(path: str | Path = "templates/base_cover_letter.docx") -> str:
         """Read the example cover letter for reference."""
         path = Path(path)
