@@ -76,7 +76,9 @@ class CoverLetterGenerator:
                            output_dir: str | Path) -> Path:
         """Save a cover letter .docx."""
         output_dir = ensure_dir(output_dir)
-        filename = sanitize_filename(f"cover_letter_{company}_{role}") + ".docx"
+        # Human-like filename: Danna_Dobi_Cover_Letter_ShortTitle.docx
+        short_role = role.split(",")[0].split("|")[0].split("—")[0].split("/")[0].strip()[:30]
+        filename = sanitize_filename(f"Danna_Dobi_Cover_Letter_{short_role}") + ".docx"
         output_path = output_dir / filename
 
         return self.save_cover_letter(
