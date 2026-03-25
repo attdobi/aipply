@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# TODO: Consider moving inline HTML templates to templates/ directory
+# Currently ~750 lines, ~500 of which are HTML template strings
 """Aipply Dashboard — live job application tracker with docx preview."""
 
 import json
