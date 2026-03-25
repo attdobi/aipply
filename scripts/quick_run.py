@@ -23,6 +23,7 @@ from src.linkedin_scanner import LinkedInScanner
 from src.resume_tailor import ResumeTailor
 from src.cover_letter_gen import CoverLetterGenerator
 from src.tracker import ApplicationTracker
+from src.deslop import clean_docx
 
 
 def scan_jobs(keyword="compliance manager", location="San Francisco Bay Area", limit=5):
@@ -90,6 +91,12 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
     # Save job description
     jd_path = out_dir / 'job_description.txt'
     jd_path.write_text(f"Company: {company}\nTitle: {title}\nLocation: {location}\nURL: {url}\n\n{desc}")
+
+    # De-slop all generated docs
+    if resume_path:
+        clean_docx(resume_path)
+    if cl_path:
+        clean_docx(cl_path)
 
     # Track
     tracker = ApplicationTracker('output/tracker.json')
