@@ -449,7 +449,7 @@ class LinkedInApplicant:
                 time.sleep(random.uniform(1, 3))
                 next_btn.click()
                 time.sleep(random.uniform(2, 4))
-                logger.debug("Clicked next/continue button")
+                logger.info("Clicked next/continue button")
             else:
                 logger.warning("No next/continue button found")
         except Exception as e:
@@ -470,7 +470,7 @@ class LinkedInApplicant:
             email_select = modal.locator("select").first
             if email_select.is_visible(timeout=1000):
                 # Check if the desired email is available as an option
-                target_email = "danna.dobi@gmail.com"
+                target_email = self.candidate.get("email", "danna.dobi@gmail.com")
                 options = email_select.locator("option").all()
                 already_selected = False
                 for opt in options:
@@ -491,7 +491,7 @@ class LinkedInApplicant:
 
         # Phone number — text input near phone/mobile label
         try:
-            phone_target = "5103338812"
+            phone_target = self.candidate.get("phone", "").replace("-", "").replace(" ", "") or "5103338812"
             # Try multiple selectors for phone input
             phone_selectors = [
                 'input[id*="phoneNumber"]',
@@ -595,7 +595,7 @@ class LinkedInApplicant:
                 return
 
         except Exception as e:
-            logger.debug(f"Cover letter upload: {e}")
+            logger.warning(f"Cover letter upload failed: {e}")
 
     def _upload_resume(self, page: Page, resume_path):
         """Handle resume upload step — handles multiple LinkedIn patterns.
@@ -650,7 +650,7 @@ class LinkedInApplicant:
                     return True
 
         except Exception as e:
-            logger.debug(f"Resume upload: {e}")
+            logger.warning(f"Resume upload failed: {e}")
         return False
 
     def _answer_common_questions(self, page: Page):
@@ -816,7 +816,7 @@ class LinkedInApplicant:
                         logger.debug(f"Filled 'San Francisco, CA' for: '{label_text[:40]}'")
                     # LinkedIn URL
                     elif "linkedin" in label_text:
-                        inp.fill("https://www.linkedin.com/in/dannadobi")
+                        inp.fill(self.candidate.get("linkedin_url", "https://www.linkedin.com/in/dannadobi"))
                         logger.debug(f"Filled LinkedIn URL for: '{label_text[:40]}'")
                     # GPA
                     elif "gpa" in label_text:
@@ -1035,7 +1035,7 @@ class LinkedInApplicant:
             page.screenshot(path=str(screenshot_path))
             path_str = str(screenshot_path)
             self.screenshots.append(path_str)
-            logger.info(f"Screenshot saved: {path_str}")
+            logger.debug(f"Screenshot saved: {path_str}")
             return path_str
         except Exception as e:
             logger.error(f"Failed to take screenshot: {e}")
@@ -1151,12 +1151,16 @@ class LinkedInApplicant:
                                 field_name = (el.get_attribute("name") or el.get_attribute("placeholder") or "").lower()
                             except Exception:
                                 pass
+                            full_name = self.candidate.get("name", "Danna Dobi")
+                            name_parts = full_name.split()
+                            first_name = name_parts[0] if name_parts else "Danna"
+                            last_name = name_parts[-1] if len(name_parts) > 1 else "Dobi"
                             if "first" in field_name:
-                                el.fill("Danna")
+                                el.fill(first_name)
                             elif "last" in field_name:
-                                el.fill("Dobi")
+                                el.fill(last_name)
                             else:
-                                el.fill("Danna Dobi")
+                                el.fill(full_name)
                             time.sleep(random.uniform(1, 2))
                             filled_count += 1
                             logger.info(f"Filled name field: {sel}")
@@ -1198,7 +1202,7 @@ class LinkedInApplicant:
                     if is_vis:
                         val = el.input_value() or ""
                         if not val.strip():
-                            el.fill("danna.dobi@gmail.com")
+                            el.fill(self.candidate.get("email", ""))
                             time.sleep(random.uniform(1, 2))
                             filled_count += 1
                             logger.info(f"Filled email: {sel}")
@@ -1215,7 +1219,8 @@ class LinkedInApplicant:
                     if is_vis:
                         val = el.input_value() or ""
                         if not val.strip():
-                            el.fill("5103338812")
+                            phone = self.candidate.get("phone", "").replace("-", "").replace(" ", "")
+                            el.fill(phone)
                             time.sleep(random.uniform(1, 2))
                             filled_count += 1
                             logger.info(f"Filled phone: {sel}")
@@ -1231,7 +1236,7 @@ class LinkedInApplicant:
                     if is_vis:
                         val = el.input_value() or ""
                         if not val.strip():
-                            el.fill("https://www.linkedin.com/in/dannadobi")
+                            el.fill(self.candidate.get("linkedin_url", ""))
                             time.sleep(random.uniform(1, 2))
                             filled_count += 1
                             logger.info(f"Filled LinkedIn URL: {sel}")

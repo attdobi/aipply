@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 
+import yaml
+
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -48,27 +50,18 @@ TRACKER_PATH = PROJECT_ROOT / "output" / "tracker.json"
 BASE_RESUME = PROJECT_ROOT / "templates" / "base_resume.docx"
 LOG_FILE = PROJECT_ROOT / "output" / "apply_loop.log"
 
-SEARCH_KEYWORDS = [
-    "compliance analyst",
-    "risk analyst",
-    "audit analyst",
-    "BSA AML analyst",
-    "regulatory analyst",
-    "compliance specialist",
-    "fraud analyst",
-    "governance analyst",
-]
-
-SEARCH_LOCATIONS = [
-    "San Francisco Bay Area",
-    "United States",  # for remote
-]
+# Load config from YAML files
+_profile = yaml.safe_load(open(PROJECT_ROOT / "config" / "profile.yaml"))
+_settings = yaml.safe_load(open(PROJECT_ROOT / "config" / "settings.yaml"))
 
 CANDIDATE = {
-    "name": "Danna Z. Dobi",
-    "email": "danna.dobi@gmail.com",
-    "phone": "510-333-8812",
+    "name": _profile["candidate"]["name"],
+    "email": _profile["candidate"]["email"],
+    "phone": _profile["candidate"].get("phone", ""),
 }
+
+SEARCH_KEYWORDS = _settings["search"]["keywords"]
+SEARCH_LOCATIONS = _settings["search"].get("locations", ["San Francisco Bay Area"])
 
 # Setup logging
 ensure_dir(PROJECT_ROOT / "output")
@@ -314,7 +307,7 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
             json.dump(job_info, f, indent=2)
 
         # Submit application using LinkedInApplicant (reuses the same browser)
-        applicant = LinkedInApplicant()
+        applicant = LinkedInApplicant(config=_settings, profile=_profile)
         applicant.page = scanner_page
         applicant.playwright = None  # Don't let close() try to stop playwright
         applicant.browser = None
@@ -395,6 +388,15 @@ def main():
         STOP_FILE.unlink()
         logger.info("Removed stale .stop file")
 
+    # Remove stale SingletonLock to prevent "profile in use" errors after crashes
+    lock_path = Path.home() / ".aipply" / "chrome-profile" / "SingletonLock"
+    if lock_path.exists():
+        try:
+            lock_path.unlink()
+            logger.info("Removed stale SingletonLock")
+        except OSError:
+            pass
+
     # Launch browser once — reuse across all cycles
     from playwright.sync_api import sync_playwright
 
@@ -462,6 +464,31 @@ def main():
 
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
+                # Check if browser is still alive
+                try:
+                    page.evaluate("1+1")
+                except Exception:
+                    logger.warning("Browser appears dead, relaunching...")
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+                    try:
+                        pw.stop()
+                    except Exception:
+                        pass
+                    pw = sync_playwright().start()
+                    context = pw.chromium.launch_persistent_context(
+                        user_data_dir=PROFILE_DIR,
+                        headless=False,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                        ],
+                    )
+                    page = context.pages[0] if context.pages else context.new_page()
+                    logger.info("Browser relaunched successfully")
                 logger.info("Waiting 60s before retrying...")
                 time.sleep(60)
 
