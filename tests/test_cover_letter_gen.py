@@ -1,41 +1,27 @@
-"""Tests for cover letter generator module."""
+"""Tests for cover letter generator module.
+
+Tests the actual CoverLetterGenerator functionality — no OpenAI mocks needed
+since the module now accepts text directly and formats it as .docx.
+"""
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from docx import Document
 
-
-@pytest.fixture
-def mock_openai():
-    """Mock the OpenAI client before CoverLetterGenerator is instantiated."""
-    with patch("src.cover_letter_gen.OpenAI") as mock_cls:
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        yield mock_client
+from src.cover_letter_gen import CoverLetterGenerator
 
 
 @pytest.fixture
-def cover_gen(mock_openai):
-    """Create a CoverLetterGenerator with test config and mocked OpenAI."""
-    from src.cover_letter_gen import CoverLetterGenerator
-
-    config = {
-        "openai": {
-            "model": "gpt-4",
-            "temperature": 0.7,
-        }
-    }
-    return CoverLetterGenerator(config=config)
-
-
-@pytest.fixture
-def cover_gen_no_config(mock_openai):
-    """Create a CoverLetterGenerator with no config."""
-    from src.cover_letter_gen import CoverLetterGenerator
-
+def gen():
+    """Create a CoverLetterGenerator with default config."""
     return CoverLetterGenerator()
+
+
+@pytest.fixture
+def gen_with_config():
+    """Create a CoverLetterGenerator with custom config."""
+    return CoverLetterGenerator(config={"some_key": "some_value"})
 
 
 @pytest.fixture
@@ -44,138 +30,149 @@ def candidate_profile():
     return {
         "name": "Jane Doe",
         "email": "jane@example.com",
-        "location": "San Francisco",
-        "summary": "Experienced compliance professional.",
-        "strengths": ["Regulatory compliance", "Risk management"],
-        "target_roles": ["Compliance Manager", "Risk Analyst"],
+        "phone": "555-123-4567",
     }
 
 
+@pytest.fixture
+def sample_text():
+    """Sample cover letter text."""
+    return (
+        "Dear Hiring Manager,\n\n"
+        "I am excited about the Compliance Manager position at Acme Corp.\n\n"
+        "With my background in regulatory compliance and risk management, "
+        "I believe I would be a strong fit.\n\n"
+        "Sincerely,\nJane Doe"
+    )
+
+
 class TestCoverLetterGenInit:
-    def test_init_with_config(self, cover_gen):
-        assert cover_gen.config is not None
-        assert "openai" in cover_gen.config
-        assert cover_gen.model == "gpt-4"
-        assert cover_gen.temperature == 0.7
+    def test_init_with_config(self, gen_with_config):
+        assert gen_with_config.config == {"some_key": "some_value"}
 
-    def test_init_default_config(self, cover_gen_no_config):
-        assert cover_gen_no_config.config == {}
-        assert cover_gen_no_config.model == "gpt-4"
+    def test_init_default_config(self, gen):
+        assert gen.config == {}
 
-    def test_init_none_config(self, mock_openai):
-        from src.cover_letter_gen import CoverLetterGenerator
-
+    def test_init_none_config(self):
         g = CoverLetterGenerator(config=None)
         assert g.config == {}
 
 
-class TestGenerate:
-    def test_generate_returns_string(self, cover_gen, mock_openai, candidate_profile):
-        """generate should return cover letter text."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = (
-            "Dear Hiring Manager,\n\n"
-            "I am excited about the Compliance Manager position at Acme Corp. "
-            "With my background in regulatory compliance and risk management, "
-            "I believe I would be a strong fit.\n\n"
-            "Sincerely,\nJane Doe"
-        )
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        result = cover_gen.generate(
-            "Seeking a compliance manager with 5 years experience",
-            candidate_profile,
-            company="Acme Corp",
-            role="Compliance Manager",
-        )
-        assert isinstance(result, str)
-        assert "Compliance Manager" in result or "compliance" in result.lower()
-        mock_openai.chat.completions.create.assert_called_once()
-
-    def test_generate_with_empty_description(self, cover_gen, mock_openai, candidate_profile):
-        """generate should handle empty job description gracefully."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Dear Hiring Manager,\n\nI am interested.\n\nSincerely,\nJane"
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        result = cover_gen.generate("", candidate_profile)
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_generate_with_empty_profile(self, cover_gen, mock_openai):
-        """generate should handle empty candidate profile."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Dear Hiring Manager,\n\nCover letter.\n\nBest regards"
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        result = cover_gen.generate("Job description text", {})
-        assert isinstance(result, str)
-
-    def test_generate_with_example_letter(self, cover_gen, mock_openai, candidate_profile, tmp_path):
-        """generate should incorporate example letter when provided."""
-        # Create example letter docx
+class TestReadExample:
+    def test_read_example_returns_text(self, tmp_path):
+        """read_example should return text content from a .docx file."""
         doc = Document()
         doc.add_paragraph("Example cover letter with professional tone.")
+        doc.add_paragraph("Second paragraph of the example.")
         example_path = tmp_path / "example.docx"
         doc.save(str(example_path))
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Generated letter matching style."
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        result = cover_gen.generate(
-            "Job desc", candidate_profile,
-            company="Corp", role="Manager",
-            example_letter_path=example_path,
-        )
+        result = CoverLetterGenerator.read_example(example_path)
         assert isinstance(result, str)
-        # Verify the call includes the user prompt (OpenAI was called)
-        mock_openai.chat.completions.create.assert_called_once()
+        assert "professional tone" in result
+        assert "Second paragraph" in result
+
+    def test_read_example_missing_file_returns_empty(self, tmp_path):
+        """read_example should return empty string for missing file."""
+        result = CoverLetterGenerator.read_example(tmp_path / "nonexistent.docx")
+        assert result == ""
+
+    def test_read_example_skips_blank_paragraphs(self, tmp_path):
+        """read_example should skip paragraphs that are only whitespace."""
+        doc = Document()
+        doc.add_paragraph("Content paragraph")
+        doc.add_paragraph("")  # blank
+        doc.add_paragraph("   ")  # whitespace only
+        doc.add_paragraph("Another paragraph")
+        example_path = tmp_path / "example.docx"
+        doc.save(str(example_path))
+
+        result = CoverLetterGenerator.read_example(example_path)
+        lines = result.split("\n")
+        assert len(lines) == 2
+        assert "Content paragraph" in lines[0]
+        assert "Another paragraph" in lines[1]
 
 
 class TestSaveCoverLetter:
-    def test_save_cover_letter_creates_docx(self, cover_gen, tmp_path):
-        """save_cover_letter should create a valid .docx file."""
+    def test_save_creates_valid_docx(self, tmp_path, sample_text):
+        """save_cover_letter should create a valid .docx with expected content."""
         output_path = tmp_path / "cover_letter.docx"
-        content = "Dear Hiring Manager,\n\nI am writing to apply.\n\nSincerely,\nJane Doe"
 
-        result = cover_gen.save_cover_letter(content, output_path)
+        result = CoverLetterGenerator.save_cover_letter(
+            text=sample_text,
+            candidate_name="Jane Doe",
+            candidate_email="jane@example.com",
+            candidate_phone="555-123-4567",
+            output_path=output_path,
+        )
         assert result == output_path
         assert output_path.exists()
 
         doc = Document(str(output_path))
-        assert len(doc.paragraphs) >= 1
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Compliance Manager" in full_text
+        assert "Jane Doe" in full_text
+        assert "jane@example.com" in full_text
+        assert "555-123-4567" in full_text
 
-    def test_save_creates_parent_dirs(self, cover_gen, tmp_path):
-        """save_cover_letter should create parent directories."""
+    def test_save_creates_parent_dirs(self, tmp_path, sample_text):
+        """save_cover_letter should create parent directories if needed."""
         output_path = tmp_path / "subdir" / "deep" / "cover_letter.docx"
-        content = "Cover letter content"
 
-        result = cover_gen.save_cover_letter(content, output_path)
+        result = CoverLetterGenerator.save_cover_letter(
+            text=sample_text,
+            candidate_name="Jane Doe",
+            candidate_email="jane@example.com",
+            candidate_phone="",
+            output_path=output_path,
+        )
         assert output_path.exists()
+
+    def test_save_handles_empty_contact(self, tmp_path):
+        """save_cover_letter should handle empty email and phone gracefully."""
+        output_path = tmp_path / "cover.docx"
+        CoverLetterGenerator.save_cover_letter(
+            text="Short letter.",
+            candidate_name="Name",
+            candidate_email="",
+            candidate_phone="",
+            output_path=output_path,
+        )
+        assert output_path.exists()
+
+        doc = Document(str(output_path))
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Name" in full_text
+
+    def test_save_preserves_paragraphs(self, tmp_path):
+        """Each non-empty line should become its own paragraph."""
+        text = "Line one.\n\nLine two.\n\nLine three."
+        output_path = tmp_path / "multi.docx"
+
+        CoverLetterGenerator.save_cover_letter(
+            text=text,
+            candidate_name="Test",
+            candidate_email="t@t.com",
+            candidate_phone="",
+            output_path=output_path,
+        )
+
+        doc = Document(str(output_path))
+        content_paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        # 3 content paragraphs + signature name + contact line
+        assert any("Line one." in p for p in content_paragraphs)
+        assert any("Line two." in p for p in content_paragraphs)
+        assert any("Line three." in p for p in content_paragraphs)
 
 
 class TestGenerateAndSave:
-    def test_generate_and_save_end_to_end(self, cover_gen, mock_openai, candidate_profile, tmp_path):
-        """End-to-end: generate_and_save produces a .docx file."""
+    def test_generate_and_save_creates_docx(self, gen, candidate_profile, sample_text, tmp_path):
+        """generate_and_save should produce a .docx file."""
         output_dir = tmp_path / "output"
-        output_dir.mkdir()
 
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = (
-            "Dear Hiring Manager,\n\n"
-            "I am excited about this opportunity.\n\n"
-            "Sincerely,\nJane Doe"
-        )
-        mock_openai.chat.completions.create.return_value = mock_response
-
-        result = cover_gen.generate_and_save(
-            job_description="Compliance manager role",
+        result = gen.generate_and_save(
+            text=sample_text,
             candidate_profile=candidate_profile,
             company="Acme Corp",
             role="Compliance Manager",
@@ -187,19 +184,71 @@ class TestGenerateAndSave:
         doc = Document(str(result))
         assert len(doc.paragraphs) >= 1
 
-    def test_generate_and_save_default_output_dir(self, cover_gen, mock_openai, candidate_profile):
-        """generate_and_save should create default output dir when none specified."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Generated letter."
-        mock_openai.chat.completions.create.return_value = mock_response
+    def test_generate_and_save_filename_pattern(self, gen, candidate_profile, sample_text, tmp_path):
+        """Output filename should contain 'Danna_Dobi_Cover_Letter' and role."""
+        output_dir = tmp_path / "output"
 
-        result = cover_gen.generate_and_save(
-            job_description="Job desc",
+        result = gen.generate_and_save(
+            text=sample_text,
             candidate_profile=candidate_profile,
+            company="Acme",
+            role="Compliance Manager",
+            output_dir=output_dir,
+        )
+        filename = Path(result).name
+        assert "Danna_Dobi_Cover_Letter" in filename
+        assert "Compliance" in filename
+        assert filename.endswith(".docx")
+
+    def test_generate_and_save_truncates_long_role(self, gen, candidate_profile, sample_text, tmp_path):
+        """Long role names should be truncated in the filename."""
+        output_dir = tmp_path / "output"
+
+        long_role = "Senior Compliance Manager, Risk and Governance | Full Time — Remote"
+        result = gen.generate_and_save(
+            text=sample_text,
+            candidate_profile=candidate_profile,
+            company="BigCo",
+            role=long_role,
+            output_dir=output_dir,
+        )
+        filename = Path(result).name
+        # The role portion should be truncated at the first delimiter
+        assert "Danna_Dobi_Cover_Letter" in filename
+        assert len(filename) < 200
+
+    def test_generate_and_save_uses_candidate_info(self, gen, sample_text, tmp_path):
+        """The .docx should include candidate name/email/phone from profile."""
+        output_dir = tmp_path / "output"
+        profile = {
+            "name": "Test User",
+            "email": "test@example.com",
+            "phone": "999-888-7777",
+        }
+
+        result = gen.generate_and_save(
+            text=sample_text,
+            candidate_profile=profile,
             company="TestCo",
             role="Analyst",
+            output_dir=output_dir,
+        )
+
+        doc = Document(str(result))
+        full_text = "\n".join(p.text for p in doc.paragraphs)
+        assert "Test User" in full_text
+        assert "test@example.com" in full_text
+
+    def test_generate_and_save_creates_output_dir(self, gen, candidate_profile, sample_text, tmp_path):
+        """generate_and_save should create the output directory if it doesn't exist."""
+        output_dir = tmp_path / "nonexistent" / "nested"
+
+        result = gen.generate_and_save(
+            text=sample_text,
+            candidate_profile=candidate_profile,
+            company="Co",
+            role="Role",
+            output_dir=output_dir,
         )
         assert Path(result).exists()
-        # Clean up
-        Path(result).unlink(missing_ok=True)
+        assert output_dir.exists()
