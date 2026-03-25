@@ -97,6 +97,14 @@ def cover_letter_path(tmp_path):
     return str(p)
 
 
+@pytest.fixture(autouse=True)
+def _no_sleep():
+    """Patch time.sleep and random.uniform to avoid real delays in tests."""
+    with patch("src.ats_handlers.time.sleep"), \
+         patch("src.ats_handlers.random.uniform", return_value=0):
+        yield
+
+
 # ===========================================================================
 # 1. detect_ats
 # ===========================================================================
