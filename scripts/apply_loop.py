@@ -109,7 +109,6 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
         f"https://www.linkedin.com/jobs/search/"
         f"?keywords={quote_plus(keyword)}"
         f"&location={quote_plus(location)}"
-        f"&f_AL=true"
         f"&sortBy=DD"
         f"{extra_params}"
     )
@@ -240,21 +239,25 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
                 if location_text:
                     break
 
-        # Check for Easy Apply button
-        easy_apply_btn = None
-        for ea_sel in ['button[aria-label*="Easy Apply"]', 'button:has-text("Easy Apply")']:
+        # Check for Apply button (Easy Apply or external)
+        has_apply = False
+        for ap_sel in [
+            'button[aria-label*="Easy Apply"]',
+            'button:has-text("Easy Apply")',
+            'button.jobs-apply-button',
+            'a.jobs-apply-button',
+            'button:has-text("Apply")',
+        ]:
             try:
-                loc = scanner_page.locator(ea_sel).first
+                loc = scanner_page.locator(ap_sel).first
                 if loc.is_visible(timeout=2000):
-                    btn_text = loc.inner_text().strip()
-                    if "Easy" in btn_text:
-                        easy_apply_btn = loc
-                        break
+                    has_apply = True
+                    break
             except Exception:
                 continue
 
-        if not easy_apply_btn:
-            logger.info(f"  No Easy Apply, skipping")
+        if not has_apply:
+            logger.info(f"  No Apply button found, skipping")
             continue
 
         # Found an Easy Apply job — tailor and apply

@@ -2,10 +2,14 @@
 
 candidate:
   name: "Danna Dobi"
+  first_name: "Danna"
+  last_name: "Dobi"
   email: "danna.dobi@gmail.com"
   phone: "510-333-8812"
   linkedin_url: "https://www.linkedin.com/in/danna-dobi/"
   location: "San Francisco Bay Area"
+  address: "9 Bordwell Court, Alameda CA 94502"
+  how_did_you_hear: "LinkedIn"
 
   summary: |
     Experienced compliance, risk, and governance professional.
