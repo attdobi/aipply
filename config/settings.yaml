@@ -26,7 +26,8 @@ application:
   max_applications_per_cycle: 10
 
 schedule:
-  interval_hours: 1
+  interval_minutes: 30
+  delay_between_applications_seconds: 600  # 10 min between each application
 
 openai:
   model: "gpt-4"

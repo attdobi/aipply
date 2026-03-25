@@ -361,6 +361,12 @@ class LinkedInScanner:
         target_page.goto(job_url, wait_until="domcontentloaded", timeout=30_000)
         target_page.wait_for_timeout(2000)
 
+        # Scroll down to trigger lazy-loading of description section
+        for _ in range(4):
+            target_page.evaluate("window.scrollBy(0, 600)")
+            target_page.wait_for_timeout(400)
+        target_page.wait_for_timeout(1000)
+
         # Try to click "Show more" / "See more" to expand the description
         try:
             show_more = target_page.query_selector(
@@ -428,6 +434,30 @@ class LinkedInScanner:
                 description = el.inner_text().strip()
                 if description:
                     break
+
+        # Fallback: extract "About the job" section from page body text
+        if not description:
+            try:
+                body_text = target_page.evaluate("() => document.body.innerText")
+                marker = "About the job"
+                idx = body_text.find(marker)
+                if idx != -1:
+                    raw = body_text[idx + len(marker):].strip()
+                    # Truncate at common footer markers
+                    for stop in [
+                        "Show less",
+                        "People you can reach out to",
+                        "Similar jobs",
+                        "More from this employer",
+                    ]:
+                        stop_idx = raw.find(stop)
+                        if stop_idx != -1:
+                            raw = raw[:stop_idx].strip()
+                    if len(raw) > 100:
+                        description = raw
+                        logger.debug("Used body-text fallback for description (%d chars)", len(description))
+            except Exception as exc:
+                logger.debug("Body text fallback failed: %s", exc)
 
         # Extract job ID from URL
         linkedin_job_id = ""

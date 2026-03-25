@@ -49,7 +49,10 @@ def scan_jobs(keyword="compliance manager", location="San Francisco Bay Area", l
     jobs = []
     for card in cards[:limit]:
         url = card.get('url', '')
-        if not url or tracker.is_already_applied(url):
+        card_company = card.get('company', '').strip()
+        card_title = card.get('title', '').split('\n')[0].strip()
+        if not url or tracker.is_already_applied(job_url=url, company=card_company, position=card_title):
+            print(f"  ⏭️  Skipping (already applied): {card_company} — {card_title}")
             continue
         try:
             details = scanner.get_job_details(url)
@@ -66,7 +69,7 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
                       cover_letter_text: str, dry_run=False):
     """Save tailored materials and track the application."""
     if STOP_FILE.exists():
-        print("🛑 EMERGENCY STOP — .stop file detected")
+        print("🛑 STOP — .stop file detected")
         return None
     settings = yaml.safe_load(open('config/settings.yaml'))
     profile = yaml.safe_load(open('config/profile.yaml'))
@@ -77,6 +80,12 @@ def save_application(job: dict, tailored_summary: str, competencies: list,
     location = job.get('location', '')
     url = job.get('url', '')
     desc = job.get('description', '')
+
+    # Dedup check — skip if already applied (by URL or company+title)
+    tracker_check = ApplicationTracker('output/tracker.json')
+    if tracker_check.is_already_applied(job_url=url, company=company, position=title):
+        print(f"⏭️  Already applied: {company} — {title}")
+        return None
 
     co_safe = company.replace(' ', '_').replace('/', '_').replace(',', '')[:25]
     ti_safe = title.replace(' ', '_').replace('/', '_').replace(',', '')[:25]

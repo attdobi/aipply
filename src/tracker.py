@@ -92,9 +92,16 @@ class ApplicationTracker:
             return [a for a in self.applications if a["status"] == status]
         return self.applications
 
-    def is_already_applied(self, job_url: str) -> bool:
-        """Check if we've already applied to this job."""
-        return any(a["job_url"] == job_url for a in self.applications)
+    def is_already_applied(self, job_url: str = "", company: str = "", position: str = "") -> bool:
+        """Check if we've already applied to this job (by URL or company+position)."""
+        for a in self.applications:
+            if job_url and a.get("job_url") == job_url:
+                return True
+            if company and position:
+                if (a.get("company", "").lower().strip() == company.lower().strip() and
+                    a.get("position", "").lower().strip() == position.lower().strip()):
+                    return True
+        return False
 
     def get_stats(self) -> dict:
         """Get application statistics."""
