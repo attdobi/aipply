@@ -191,30 +191,36 @@ class LinkedInApplicant:
                     "screenshots": list(self.screenshots),
                 }
 
-            # Handle external Apply — open the link, screenshot, mark as manual
+            # Handle external Apply — open the career site and try to fill out the form
             if external_apply_btn and not easy_apply_btn:
-                logger.info(f"External Apply for {role} at {company} — opening career site")
+                logger.info(f"External Apply for {role} at {company} — navigating to career site")
                 time.sleep(random.uniform(2, 4))
                 external_apply_btn.click()
-                time.sleep(random.uniform(3, 5))
+                time.sleep(random.uniform(4, 7))
 
-                # New tab may have opened — screenshot it
+                # Switch to the new tab if one opened
                 pages = self.page.context.pages
-                if len(pages) > 1:
-                    new_page = pages[-1]
-                    self._take_screenshot(new_page, job, output_dir, "external_career_site")
-                    career_url = new_page.url
-                    logger.info(f"External career site opened: {career_url}")
-                    new_page.close()
-                else:
-                    self._take_screenshot(self.page, job, output_dir, "external_apply_clicked")
+                ext_page = pages[-1] if len(pages) > 1 else self.page
+                time.sleep(random.uniform(2, 4))
+                self._take_screenshot(ext_page, job, output_dir, "external_career_site")
+                logger.info(f"External career site: {ext_page.url}")
 
-                return {
-                    "success": False,
-                    "status": "manual_needed",
-                    "reason": "external_apply_opened",
-                    "screenshots": list(self.screenshots),
-                }
+                # Try to fill out external application form
+                try:
+                    result = self._fill_external_application(ext_page, job, resume_path, cover_letter_path, output_dir)
+                    if len(pages) > 1:
+                        ext_page.close()
+                    return result
+                except Exception as e:
+                    logger.warning(f"External application failed: {e}")
+                    if len(pages) > 1:
+                        ext_page.close()
+                    return {
+                        "success": False,
+                        "status": "manual_needed",
+                        "reason": f"external_apply_failed: {e}",
+                        "screenshots": list(self.screenshots),
+                    }
 
             # Click Easy Apply
             time.sleep(random.uniform(2, 5))
@@ -665,6 +671,135 @@ class LinkedInApplicant:
         except Exception as e:
             logger.error(f"Failed to take screenshot: {e}")
             return ""
+
+    def _fill_external_application(self, page, job, resume_path, cover_letter_path, output_dir):
+        """Try to fill out an external career site application form.
+        
+        Uses common patterns across ATS systems (Greenhouse, Lever, Workday, etc.)
+        to find and fill form fields, upload resume, and submit.
+        """
+        company = job.get("company", "")
+        role = job.get("title", "")
+        logger.info(f"Attempting external application on {page.url}")
+
+        # Common field patterns across ATS systems
+        name_fields = ['input[name*="name" i]', 'input[placeholder*="name" i]', 'input[aria-label*="name" i]', 'input#first_name', 'input#last_name', 'input[name*="first" i]', 'input[name*="last" i]']
+        email_fields = ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]', 'input[aria-label*="email" i]']
+        phone_fields = ['input[type="tel"]', 'input[name*="phone" i]', 'input[placeholder*="phone" i]', 'input[aria-label*="phone" i]']
+        resume_fields = ['input[type="file"]', 'input[accept*=".pdf" i]', 'input[accept*=".doc" i]', 'input[name*="resume" i]']
+
+        filled_something = False
+
+        # Fill name fields
+        for sel in name_fields:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    val = el.input_value() or ""
+                    if not val.strip():
+                        field_name = (el.get_attribute("name") or el.get_attribute("placeholder") or "").lower()
+                        if "first" in field_name:
+                            el.fill("Danna")
+                        elif "last" in field_name:
+                            el.fill("Dobi")
+                        else:
+                            el.fill("Danna Dobi")
+                        time.sleep(random.uniform(1, 2))
+                        filled_something = True
+                        logger.info(f"Filled name field: {sel}")
+            except Exception:
+                pass
+
+        # Fill email
+        for sel in email_fields:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    val = el.input_value() or ""
+                    if not val.strip():
+                        el.fill("danna.dobi@gmail.com")
+                        time.sleep(random.uniform(1, 2))
+                        filled_something = True
+                        logger.info(f"Filled email: {sel}")
+            except Exception:
+                pass
+
+        # Fill phone
+        for sel in phone_fields:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    val = el.input_value() or ""
+                    if not val.strip():
+                        el.fill("5103338812")
+                        time.sleep(random.uniform(1, 2))
+                        filled_something = True
+                        logger.info(f"Filled phone: {sel}")
+            except Exception:
+                pass
+
+        # Upload resume
+        for sel in resume_fields:
+            try:
+                el = page.query_selector(sel)
+                if el:
+                    if resume_path and os.path.exists(resume_path):
+                        el.set_input_files(str(resume_path))
+                        time.sleep(random.uniform(2, 4))
+                        filled_something = True
+                        logger.info(f"Uploaded resume via {sel}")
+                    break
+            except Exception:
+                pass
+
+        time.sleep(random.uniform(2, 4))
+        self._take_screenshot(page, job, output_dir, "external_form_filled")
+
+        # Try to find and click submit
+        submitted = False
+        for submit_sel in [
+            'button[type="submit"]',
+            'input[type="submit"]',
+            'button:has-text("Submit")',
+            'button:has-text("Apply")',
+            'button:has-text("Send")',
+            'a:has-text("Submit")',
+        ]:
+            try:
+                btn = page.locator(submit_sel).first
+                if btn.is_visible(timeout=2000):
+                    self._take_screenshot(page, job, output_dir, "external_pre_submit")
+                    time.sleep(random.uniform(2, 4))
+                    btn.click()
+                    time.sleep(random.uniform(3, 5))
+                    self._take_screenshot(page, job, output_dir, "external_post_submit")
+                    submitted = True
+                    logger.info(f"Clicked submit on external site via {submit_sel}")
+                    break
+            except Exception:
+                continue
+
+        if submitted:
+            return {
+                "success": True,
+                "status": "applied",
+                "reason": "external_apply_submitted",
+                "screenshots": list(self.screenshots),
+            }
+        elif filled_something:
+            return {
+                "success": False,
+                "status": "manual_needed",
+                "reason": "external_form_partially_filled",
+                "screenshots": list(self.screenshots),
+            }
+        else:
+            return {
+                "success": False,
+                "status": "manual_needed",
+                "reason": "external_form_not_recognized",
+                "screenshots": list(self.screenshots),
+            }
 
     def close(self):
         """Close browser resources and clean up."""
