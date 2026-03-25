@@ -113,7 +113,12 @@ class ApplicationTracker:
         }
 
     def generate_html_report(self, output_path: str = "output/reports/report.html") -> str:
-        """Generate an HTML report of all applications."""
+        """Generate a static HTML report of all applications.
+
+        Note: The primary dashboard is served by scripts/dashboard.py (Flask),
+        which reads tracker.json directly for live data. This method is kept as
+        a fallback for static HTML export (e.g., email reports, offline use).
+        """
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
 
