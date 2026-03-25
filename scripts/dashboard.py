@@ -708,37 +708,117 @@ def api_cycle_status():
         return jsonify(dict(_cycle_state))
 
 
+def _tailor_for_job(job_desc, company, role):
+    """Use GPT-4 to generate tailored summary + competencies + cover letter."""
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Read base resume for context
+    base_resume = ""
+    try:
+        from docx import Document as DocxDoc
+        doc = DocxDoc(str(ROOT / "templates" / "base_resume.docx"))
+        base_resume = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    except Exception:
+        pass
+
+    # Read example cover letter for tone
+    example_cl = ""
+    try:
+        from docx import Document as DocxDoc
+        doc = DocxDoc(str(ROOT / "templates" / "base_cover_letter.docx"))
+        example_cl = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    except Exception:
+        pass
+
+    prompt = f"""Given this resume and job description, provide:
+1. A tailored Professional Summary (one paragraph, ~80 words)
+2. A reordered list of 10 Core Competencies (most relevant first)
+3. A cover letter (3-4 paragraphs, matching the example tone)
+
+RESUME:
+{base_resume[:3000]}
+
+EXAMPLE COVER LETTER (match this tone):
+{example_cl}
+
+JOB: {role} at {company}
+DESCRIPTION:
+{job_desc[:2000]}
+
+RULES:
+- NEVER fabricate experience. Only reference OCC, Prime Trust, Cross River Bank, PG&E.
+- NEVER use em-dashes ( — ). Use commas instead.
+- NEVER use "leverage", "utilize", "synergy", "I'm excited to", "I'm thrilled to".
+- Be direct and professional. No fluff.
+
+Return ONLY valid JSON:
+{{"summary": "...", "competencies": ["...", ...], "cover_letter": "Dear Hiring Team,\\n\\n...\\n\\nThank you for your time,"}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            temperature=0.4,
+            messages=[
+                {"role": "system", "content": "You are a professional resume writer. Return only JSON. Never fabricate experience."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+            if clean.endswith("```"):
+                clean = clean[:-3]
+        return json.loads(clean)
+    except Exception as e:
+        print(f"  ⚠️ Tailoring failed: {e}")
+        return None
+
+
 def _run_cycle_background(cycle_id, keyword, location, limit):
     """Run a scan+apply cycle in a background thread."""
     try:
-        # Import here to avoid circular issues
         sys.path.insert(0, str(ROOT))
         from scripts.quick_run import scan_jobs, save_application
 
-        # Scan for jobs
         with _cycle_lock:
             _cycle_state["total"] = 0
             _cycle_state["processed"] = 0
 
+        print(f"🔍 Cycle {cycle_id}: Scanning LinkedIn...")
         jobs = scan_jobs(keyword=keyword, location=location, limit=limit)
+        print(f"✅ Cycle {cycle_id}: Found {len(jobs)} jobs")
 
         with _cycle_lock:
             _cycle_state["total"] = len(jobs)
 
         for i, job in enumerate(jobs):
-            # Check stop file before each application
             if STOP_FILE.exists():
                 print(f"🛑 Cycle {cycle_id} halted by stop after {i} jobs")
                 break
 
+            company = job.get("company", "Unknown")
+            title = job.get("title", "Role").split("\n")[0]
+            desc = job.get("description", "")
+            print(f"📝 Cycle {cycle_id} [{i+1}/{len(jobs)}]: {company} — {title}")
+
             try:
-                save_application(
-                    job=job,
-                    tailored_summary=job.get("description", "")[:500],
-                    competencies=[],
-                    cover_letter_text="",
-                    dry_run=True,
-                )
+                # Tailor content via GPT-4
+                tailored = _tailor_for_job(desc, company, title)
+                if tailored:
+                    save_application(
+                        job=job,
+                        tailored_summary=tailored.get("summary", ""),
+                        competencies=tailored.get("competencies", []),
+                        cover_letter_text=tailored.get("cover_letter", ""),
+                        dry_run=False,
+                    )
+                    print(f"  ✅ Applied: {company} — {title}")
+                else:
+                    print(f"  ⚠️ Skipped (tailoring failed): {company}")
             except Exception as e:
                 print(f"  ⚠️ Cycle {cycle_id}: Failed on job {i + 1}: {e}")
 
@@ -747,6 +827,8 @@ def _run_cycle_background(cycle_id, keyword, location, limit):
 
     except Exception as e:
         print(f"❌ Cycle {cycle_id} failed: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         with _cycle_lock:
             _cycle_state["running"] = False
