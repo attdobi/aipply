@@ -37,6 +37,8 @@ from src.resume_tailor import ResumeTailor
 from src.cover_letter_gen import CoverLetterGenerator
 from src.tracker import ApplicationTracker
 from src.deslop import clean_docx
+import importlib
+import src.job_filter as _job_filter_mod
 from src.job_filter import filter_job, is_relevant_title
 from src.utils import ensure_dir, sanitize_filename
 
@@ -278,6 +280,12 @@ def run_single_cycle(scanner_page, tracker, tailor, cl_gen, keyword, location):
     Returns:
         dict with result info, or None if no job found/applied.
     """
+    # Hot-reload filter module so code changes take effect without restart
+    global filter_job, is_relevant_title
+    importlib.reload(_job_filter_mod)
+    filter_job = _job_filter_mod.filter_job
+    is_relevant_title = _job_filter_mod.is_relevant_title
+
     logger.info(f"Scanning: '{keyword}' in '{location}'")
 
     extra_params = ""
