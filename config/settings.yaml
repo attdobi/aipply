@@ -45,3 +45,42 @@ schedule:
 openai:
   model: "gpt-4"
   temperature: 0.7
+
+# Job title relevance filter (added 2026-03-25)
+filter:
+  positive_keywords:
+    - compliance
+    - risk
+    - audit
+    - fraud
+    - bsa
+    - aml
+    - regulatory
+    - governance
+    - monitoring
+    - analyst
+    - specialist
+    - examiner
+    - investigator
+    - testing
+    - quality control
+    - operations
+    - officer
+    - coordinator
+  negative_keywords:
+    - investment banking
+    - software engineer
+    - data scientist
+    - sales
+    - marketing
+    - oracle
+    - sap
+    - hcm
+    - payroll specialist
+    - customer service
+    - warehouse
+    - driver
+    - nurse
+    - teacher
+    - real estate
+    - proposal strategist

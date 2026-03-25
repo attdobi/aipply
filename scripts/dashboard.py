@@ -3,6 +3,8 @@
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import threading
 import uuid
@@ -636,10 +638,22 @@ def preview(filepath):
 # API Endpoints — Controls
 # ---------------------------------------------------------------------------
 
+_cycle_process = None  # subprocess.Popen instance
+
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
+    global _cycle_process
     STOP_FILE.write_text("stopped")
+    # Also kill the subprocess if running
+    if _cycle_process and _cycle_process.poll() is None:
+        _cycle_process.terminate()
+        try:
+            _cycle_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _cycle_process.kill()
+    with _cycle_lock:
+        _cycle_state["running"] = False
     return jsonify({"stopped": True})
 
 
@@ -652,187 +666,77 @@ def api_resume():
 
 @app.route("/api/status")
 def api_status():
+    global _cycle_process
     apps = _load_tracker()
+
+    # Check if cycle process is still alive
+    cycle_running = False
+    if _cycle_process and _cycle_process.poll() is None:
+        cycle_running = True
+    elif _cycle_process and _cycle_process.poll() is not None:
+        # Process finished
+        with _cycle_lock:
+            _cycle_state["running"] = False
+
     with _cycle_lock:
         cycle = dict(_cycle_state)
+        cycle["running"] = cycle_running
+
     return jsonify({
         "running": not STOP_FILE.exists(),
         "stopped": STOP_FILE.exists(),
         "total_applications": len(apps),
-        "last_cycle": cycle.get("last_cycle"),
-        "cycle_running": cycle["running"],
+        "cycle_running": cycle_running,
         "cycle_id": cycle["cycle_id"],
         "cycle_total": cycle["total"],
-        "cycle_processed": cycle["processed"],
+        "cycle_processed": len(apps),  # Use tracker count as proxy
     })
 
 
 @app.route("/api/start-cycle", methods=["POST"])
 def api_start_cycle():
-    """Kick off a scan+apply cycle in a background thread."""
+    """Launch scripts/apply_loop.py as a subprocess."""
+    global _cycle_process
     if STOP_FILE.exists():
         return jsonify({"error": "Emergency stop is active"}), 409
 
-    with _cycle_lock:
-        if _cycle_state["running"]:
-            return jsonify({"error": "A cycle is already running", "cycle_id": _cycle_state["cycle_id"]}), 409
+    if _cycle_process and _cycle_process.poll() is None:
+        return jsonify({"error": "A cycle is already running", "pid": _cycle_process.pid}), 409
 
     data = request.get_json(silent=True) or {}
-    limit = data.get("limit", 5)
-    keyword = data.get("keyword", "compliance manager")
-    location = data.get("location", "San Francisco Bay Area")
+    interval = data.get("interval", 600)
+    max_apps = data.get("max_apps", 50)
 
-    cycle_id = str(uuid.uuid4())[:8]
+    script_path = ROOT / "scripts" / "apply_loop.py"
+    python_path = ROOT / ".venv" / "bin" / "python"
+    if not python_path.exists():
+        python_path = "python3"
+
+    # Ensure output directory exists for log file
+    (ROOT / "output").mkdir(parents=True, exist_ok=True)
+
+    _cycle_process = subprocess.Popen(
+        [str(python_path), str(script_path), "--interval", str(interval), "--max-apps", str(max_apps)],
+        cwd=str(ROOT),
+        stdout=open(str(ROOT / "output" / "apply_loop_stdout.log"), "a"),
+        stderr=subprocess.STDOUT,
+    )
 
     with _cycle_lock:
         _cycle_state.update({
             "running": True,
-            "cycle_id": cycle_id,
-            "total": 0,
+            "cycle_id": str(_cycle_process.pid),
+            "total": max_apps,
             "processed": 0,
         })
 
-    thread = threading.Thread(
-        target=_run_cycle_background,
-        args=(cycle_id, keyword, location, limit),
-        daemon=True,
-    )
-    thread.start()
-
-    return jsonify({"status": "started", "cycle_id": cycle_id})
+    return jsonify({"status": "started", "pid": _cycle_process.pid})
 
 
 @app.route("/api/cycle-status")
 def api_cycle_status():
     with _cycle_lock:
         return jsonify(dict(_cycle_state))
-
-
-def _tailor_for_job(job_desc, company, role):
-    """Use GPT-4 to generate tailored summary + competencies + cover letter."""
-    from openai import OpenAI
-    from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env")
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    # Read base resume for context
-    base_resume = ""
-    try:
-        from docx import Document as DocxDoc
-        doc = DocxDoc(str(ROOT / "templates" / "base_resume.docx"))
-        base_resume = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    except Exception:
-        pass
-
-    # Read example cover letter for tone
-    example_cl = ""
-    try:
-        from docx import Document as DocxDoc
-        doc = DocxDoc(str(ROOT / "templates" / "base_cover_letter.docx"))
-        example_cl = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    except Exception:
-        pass
-
-    prompt = f"""Given this resume and job description, provide:
-1. A tailored Professional Summary (one paragraph, ~80 words)
-2. A reordered list of 10 Core Competencies (most relevant first)
-3. A cover letter (3-4 paragraphs, matching the example tone)
-
-RESUME:
-{base_resume[:3000]}
-
-EXAMPLE COVER LETTER (match this tone):
-{example_cl}
-
-JOB: {role} at {company}
-DESCRIPTION:
-{job_desc[:2000]}
-
-RULES:
-- NEVER fabricate experience. Only reference OCC, Prime Trust, Cross River Bank, PG&E.
-- NEVER use em-dashes ( — ). Use commas instead.
-- NEVER use "leverage", "utilize", "synergy", "I'm excited to", "I'm thrilled to".
-- Be direct and professional. No fluff.
-
-Return ONLY valid JSON:
-{{"summary": "...", "competencies": ["...", ...], "cover_letter": "Dear Hiring Team,\\n\\n...\\n\\nThank you for your time,"}}"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            temperature=0.4,
-            messages=[
-                {"role": "system", "content": "You are a professional resume writer. Return only JSON. Never fabricate experience."},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        raw = response.choices[0].message.content or ""
-        clean = raw.strip()
-        if clean.startswith("```"):
-            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
-            if clean.endswith("```"):
-                clean = clean[:-3]
-        return json.loads(clean)
-    except Exception as e:
-        print(f"  ⚠️ Tailoring failed: {e}")
-        return None
-
-
-def _run_cycle_background(cycle_id, keyword, location, limit):
-    """Run a scan+apply cycle in a background thread."""
-    try:
-        sys.path.insert(0, str(ROOT))
-        from scripts.quick_run import scan_jobs, save_application
-
-        with _cycle_lock:
-            _cycle_state["total"] = 0
-            _cycle_state["processed"] = 0
-
-        print(f"🔍 Cycle {cycle_id}: Scanning LinkedIn...")
-        jobs = scan_jobs(keyword=keyword, location=location, limit=limit)
-        print(f"✅ Cycle {cycle_id}: Found {len(jobs)} jobs")
-
-        with _cycle_lock:
-            _cycle_state["total"] = len(jobs)
-
-        for i, job in enumerate(jobs):
-            if STOP_FILE.exists():
-                print(f"🛑 Cycle {cycle_id} halted by stop after {i} jobs")
-                break
-
-            company = job.get("company", "Unknown")
-            title = job.get("title", "Role").split("\n")[0]
-            desc = job.get("description", "")
-            print(f"📝 Cycle {cycle_id} [{i+1}/{len(jobs)}]: {company} — {title}")
-
-            try:
-                # Tailor content via GPT-4
-                tailored = _tailor_for_job(desc, company, title)
-                if tailored:
-                    save_application(
-                        job=job,
-                        tailored_summary=tailored.get("summary", ""),
-                        competencies=tailored.get("competencies", []),
-                        cover_letter_text=tailored.get("cover_letter", ""),
-                        dry_run=False,
-                    )
-                    print(f"  ✅ Applied: {company} — {title}")
-                else:
-                    print(f"  ⚠️ Skipped (tailoring failed): {company}")
-            except Exception as e:
-                print(f"  ⚠️ Cycle {cycle_id}: Failed on job {i + 1}: {e}")
-
-            with _cycle_lock:
-                _cycle_state["processed"] = i + 1
-
-    except Exception as e:
-        print(f"❌ Cycle {cycle_id} failed: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        with _cycle_lock:
-            _cycle_state["running"] = False
-            _cycle_state["last_cycle"] = datetime.now().isoformat()
 
 
 # ---------------------------------------------------------------------------
