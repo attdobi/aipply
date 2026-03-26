@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 import yaml
+from playwright.sync_api import sync_playwright
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -80,6 +81,36 @@ def should_stop() -> bool:
     """Check if the .stop file exists."""
     return STOP_FILE.exists()
 
+
+def launch_browser(pw_instance=None):
+    """Launch or relaunch the persistent browser context.
+
+    Returns (pw, context, page) tuple.
+    """
+    # Remove stale SingletonLock
+    lock_path = Path.home() / ".aipply" / "chrome-profile" / "SingletonLock"
+    if lock_path.exists():
+        try:
+            lock_path.unlink()
+            logger.info("Removed stale SingletonLock")
+        except OSError:
+            pass
+
+    if pw_instance is None:
+        pw_instance = sync_playwright().start()
+
+    PROFILE_DIR = str(Path.home() / ".aipply" / "chrome-profile")
+    context = pw_instance.chromium.launch_persistent_context(
+        user_data_dir=PROFILE_DIR,
+        headless=False,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ],
+    )
+    page = context.pages[0] if context.pages else context.new_page()
+    return pw_instance, context, page
 
 
 # Tailoring functions are now in src/ modules:
@@ -393,31 +424,8 @@ def main():
         STOP_FILE.unlink()
         logger.info("Removed stale .stop file")
 
-    # Remove stale SingletonLock to prevent "profile in use" errors after crashes
-    lock_path = Path.home() / ".aipply" / "chrome-profile" / "SingletonLock"
-    if lock_path.exists():
-        try:
-            lock_path.unlink()
-            logger.info("Removed stale SingletonLock")
-        except OSError:
-            pass
-
     # Launch browser once — reuse across all cycles
-    from playwright.sync_api import sync_playwright
-
-    PROFILE_DIR = str(Path.home() / ".aipply" / "chrome-profile")
-
-    pw = sync_playwright().start()
-    context = pw.chromium.launch_persistent_context(
-        user_data_dir=PROFILE_DIR,
-        headless=False,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ],
-    )
-    page = context.pages[0] if context.pages else context.new_page()
+    pw, context, page = launch_browser()
 
     tracker = ApplicationTracker(tracker_path=str(TRACKER_PATH))
     tailor = ResumeTailor()
@@ -425,6 +433,7 @@ def main():
 
     apps_submitted = 0
     keyword_idx = 0
+    consecutive_crashes = 0
 
     try:
         while apps_submitted < args.max_apps:
@@ -448,6 +457,7 @@ def main():
 
                 if result:
                     apps_submitted += 1
+                    consecutive_crashes = 0
                     logger.info(
                         f"Application #{apps_submitted}: "
                         f"{result['company']} — {result['title']} ({result['status']})"
@@ -464,16 +474,31 @@ def main():
                             time.sleep(1)
                 else:
                     # No job found in this search — short wait then try next keyword
+                    consecutive_crashes = 0  # No crash, just no jobs
                     logger.info("No match found, trying next keyword in 30s...")
                     time.sleep(30)
 
             except Exception as e:
                 logger.error(f"Cycle error: {e}", exc_info=True)
+                consecutive_crashes += 1
+
+                if consecutive_crashes >= 5:
+                    logger.critical(
+                        f"Browser crashed {consecutive_crashes} consecutive times, stopping loop"
+                    )
+                    break
+
                 # Check if browser is still alive
+                browser_dead = False
                 try:
                     page.evaluate("1+1")
                 except Exception:
-                    logger.warning("Browser appears dead, relaunching...")
+                    browser_dead = True
+
+                if browser_dead:
+                    logger.warning(
+                        f"Browser dead (crash #{consecutive_crashes}), relaunching..."
+                    )
                     try:
                         context.close()
                     except Exception:
@@ -482,18 +507,13 @@ def main():
                         pw.stop()
                     except Exception:
                         pass
-                    pw = sync_playwright().start()
-                    context = pw.chromium.launch_persistent_context(
-                        user_data_dir=PROFILE_DIR,
-                        headless=False,
-                        args=[
-                            "--disable-blink-features=AutomationControlled",
-                            "--no-first-run",
-                            "--no-default-browser-check",
-                        ],
-                    )
-                    page = context.pages[0] if context.pages else context.new_page()
-                    logger.info("Browser relaunched successfully")
+                    try:
+                        pw, context, page = launch_browser()
+                        logger.info("Browser relaunched successfully")
+                    except Exception as relaunch_err:
+                        logger.critical(f"Failed to relaunch browser: {relaunch_err}")
+                        break
+
                 logger.info("Waiting 60s before retrying...")
                 time.sleep(60)
 
