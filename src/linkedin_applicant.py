@@ -36,7 +36,7 @@ class LinkedInApplicant:
         self.playwright = None
         self.screenshots: list[str] = []
 
-    def connect_browser(self, cdp_url=None):
+    def connect_browser(self, cdp_url=None, *, existing_page=None):
         """Connect to existing Chrome via CDP or use persistent context.
 
         Uses a persistent browser context at ~/.aipply/chrome-profile/
@@ -45,7 +45,17 @@ class LinkedInApplicant:
         Args:
             cdp_url: Optional Chrome DevTools Protocol URL. If provided,
                      connects to an existing Chrome instance instead.
+            existing_page: Optional Playwright Page from an already-running
+                           browser (e.g. the scanner's page). When provided,
+                           skips launching a new Playwright instance entirely.
         """
+        if existing_page is not None:
+            self.page = existing_page
+            self.browser = None
+            self.playwright = None
+            logger.info("Applicant reusing existing browser page")
+            return
+
         # Remove stale SingletonLock to prevent "profile in use" errors
         lock_path = Path.home() / ".aipply" / "chrome-profile" / "SingletonLock"
         try:
@@ -143,44 +153,84 @@ class LinkedInApplicant:
             self._take_screenshot(self.page, job, output_dir, "job_page")
 
             # Find Apply button — Easy Apply (stays on LinkedIn) or Apply (external)
+            # IMPORTANT: Scope to the main job's top-card area to avoid clicking
+            # sidebar recommendation cards' Easy Apply buttons for different jobs.
             easy_apply_btn = None
             external_apply_btn = None
             is_easy_apply = False
 
-            # First: look for Easy Apply
-            for ea_selector in [
-                'a[aria-label*="Easy Apply"]',
-                'a:has-text("Easy Apply")',
+            # Scoped containers for the main job's apply button
+            top_card_scopes = [
+                '.job-details-jobs-unified-top-card__container--two-pane',
+                '.jobs-unified-top-card',
+                '.jobs-apply-button',
+                '.jobs-s-apply',
+                '.job-details-jobs-unified-top-card',
+            ]
+            ea_selectors = [
                 'button[aria-label*="Easy Apply"]',
                 'button:has-text("Easy Apply")',
-            ]:
-                try:
-                    loc = self.page.locator(ea_selector).first
-                    if loc.is_visible(timeout=2000):
-                        btn_text = loc.inner_text().strip()
-                        if "Easy" in btn_text:
-                            easy_apply_btn = loc
-                            is_easy_apply = True
-                            logger.info(f"Found Easy Apply: '{btn_text}'")
-                            break
-                except Exception:
-                    continue
+                'a[aria-label*="Easy Apply"]',
+                'a:has-text("Easy Apply")',
+            ]
 
-            # Second: if no Easy Apply, look for external Apply
+            # First: look for Easy Apply in scoped areas
+            for scope_sel in top_card_scopes:
+                scope = self.page.locator(scope_sel)
+                if scope.count() == 0:
+                    continue
+                for ea_selector in ea_selectors:
+                    try:
+                        loc = scope.locator(ea_selector).first
+                        if loc.is_visible(timeout=1500):
+                            btn_text = loc.inner_text().strip()
+                            if "Easy" in btn_text:
+                                easy_apply_btn = loc
+                                is_easy_apply = True
+                                logger.info(f"Found Easy Apply (scoped): '{btn_text}'")
+                                break
+                    except Exception:
+                        continue
+                if easy_apply_btn:
+                    break
+
+            # Fallback: unscoped but check text length to avoid sidebar cards
             if not easy_apply_btn:
-                for ap_selector in [
+                for ea_selector in ea_selectors:
+                    try:
+                        loc = self.page.locator(ea_selector).first
+                        if loc.is_visible(timeout=1500):
+                            btn_text = loc.inner_text().strip()
+                            if "Easy Apply" in btn_text and len(btn_text) < 30:
+                                easy_apply_btn = loc
+                                is_easy_apply = True
+                                logger.info(f"Found Easy Apply (fallback): '{btn_text}'")
+                                break
+                    except Exception:
+                        continue
+
+            # Second: if no Easy Apply, look for external Apply (also scoped)
+            if not easy_apply_btn:
+                ap_selectors = [
                     'a[aria-label*="Apply to this job"]',
                     'a:has-text("Apply")',
                     'button:has-text("Apply")',
-                ]:
-                    try:
-                        loc = self.page.locator(ap_selector).first
-                        if loc.is_visible(timeout=2000):
-                            external_apply_btn = loc
-                            logger.info(f"Found external Apply button")
-                            break
-                    except Exception:
+                ]
+                for scope_sel in top_card_scopes + ['body']:
+                    scope = self.page.locator(scope_sel)
+                    if scope.count() == 0:
                         continue
+                    for ap_selector in ap_selectors:
+                        try:
+                            loc = scope.locator(ap_selector).first
+                            if loc.is_visible(timeout=1500):
+                                external_apply_btn = loc
+                                logger.info(f"Found external Apply button (scope: {scope_sel})")
+                                break
+                        except Exception:
+                            continue
+                    if external_apply_btn:
+                        break
 
             if not easy_apply_btn and not external_apply_btn:
                 logger.info(f"No Apply button found for {role} at {company}")
@@ -258,9 +308,23 @@ class LinkedInApplicant:
                 try:
                     dialog = self.page.locator('div[role="dialog"], .artdeco-modal')
                     if dialog.count() == 0:
-                        # Dialog gone — check for confirmation text
-                        body_text = self.page.evaluate("() => document.body.innerText").lower()
-                        if "application was sent" in body_text or "application submitted" in body_text:
+                        # Dialog gone — wait and retry for confirmation text
+                        # LinkedIn sometimes takes a moment to show "application was sent"
+                        confirmed = False
+                        for wait_attempt in range(5):
+                            time.sleep(1.5)
+                            try:
+                                body_text = self.page.evaluate("() => document.body.innerText").lower()
+                                if "application was sent" in body_text or "application submitted" in body_text or "your application was submitted" in body_text:
+                                    confirmed = True
+                                    break
+                            except Exception:
+                                pass
+                            # Also check if dialog reappeared
+                            if dialog.count() > 0:
+                                break
+
+                        if confirmed:
                             self._take_screenshot(self.page, job, output_dir, "dialog_closed_confirmed")
                             logger.info(f"Dialog closed with confirmation for {role} at {company}")
                             return {
@@ -269,7 +333,11 @@ class LinkedInApplicant:
                                 "reason": "easy_apply_dialog_closed_confirmed",
                                 "screenshots": list(self.screenshots),
                             }
+                        elif dialog.count() > 0:
+                            # Dialog came back — continue the form loop
+                            pass
                         else:
+                            self._take_screenshot(self.page, job, output_dir, "dialog_dismissed")
                             logger.warning(f"Dialog dismissed without confirmation for {role} at {company}")
                             return {
                                 "success": False,

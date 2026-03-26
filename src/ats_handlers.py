@@ -37,6 +37,8 @@ def detect_ats(url: str) -> str:
         return "lever"
     if "myworkdayjobs.com" in url_lower or "workday.com" in url_lower:
         return "workday"
+    if "mercor.com" in url_lower or "work.mercor" in url_lower:
+        return "mercor"
     return "unknown"
 
 
@@ -1113,6 +1115,137 @@ class LeverHandler(ATSHandler):
 
 
 # ---------------------------------------------------------------------------
+# Mercor Handler (work.mercor.com)
+# ---------------------------------------------------------------------------
+
+class MercorHandler(ATSHandler):
+    """Handler for Mercor career site (work.mercor.com)."""
+
+    def apply(self) -> dict:
+        logger.info(f"MercorHandler: starting application on {self.page.url}")
+        filled_count = 0
+        try:
+            time.sleep(random.uniform(2, 4))
+
+            # Fill name
+            filled_count += self._fill_field_by_label(
+                "full name", self.candidate.get("name", "")
+            )
+
+            # Fill email
+            filled_count += self._fill_field_by_label(
+                "email", self.candidate.get("email", "")
+            )
+
+            # Fill phone (Mercor has a +1 prefix, just fill the number part)
+            phone = self.candidate.get("phone", "").replace("-", "").replace(" ", "")
+            if phone.startswith("1"):
+                phone = phone[1:]
+            filled_count += self._fill_field_by_label("phone", phone)
+
+            # Fill LinkedIn URL
+            filled_count += self._fill_field_by_label(
+                "linkedin", self.candidate.get("linkedin_url", "")
+            )
+
+            # Upload resume if there's a file input or upload button
+            try:
+                file_input = self.page.locator('input[type="file"]')
+                if file_input.count() > 0:
+                    file_input.first.set_input_files(self.resume_path)
+                    time.sleep(random.uniform(2, 3))
+                    filled_count += 1
+                    logger.debug("Uploaded resume via file input")
+                else:
+                    # Look for upload/resume button
+                    for btn_text in ["Upload", "Resume", "Upload resume", "Attach"]:
+                        btn = self.page.locator(f'button:has-text("{btn_text}")').first
+                        if btn.is_visible(timeout=1000):
+                            with self.page.expect_file_chooser(timeout=5000) as fc:
+                                btn.click()
+                            fc.value.set_files(self.resume_path)
+                            time.sleep(random.uniform(2, 3))
+                            filled_count += 1
+                            logger.debug(f"Uploaded resume via '{btn_text}' button")
+                            break
+            except Exception as e:
+                logger.debug(f"Resume upload: {e}")
+
+            # Work authorization — look for radio/select
+            self._click_radio_by_label("authorized", "yes")
+            self._click_radio_by_label("sponsorship", "no")
+
+            # Any other yes/no questions → Yes
+            try:
+                fieldsets = self.page.locator("fieldset").all()
+                for fs in fieldsets:
+                    try:
+                        legend = fs.locator("legend, label").first
+                        legend_text = (legend.text_content() or "").lower() if legend.count() > 0 else ""
+                        if not legend_text:
+                            continue
+                        if "sponsor" in legend_text:
+                            continue  # Already handled
+                        yes_opt = fs.locator("label:has-text('Yes'), input[value='Yes']").first
+                        if yes_opt.is_visible(timeout=300):
+                            yes_opt.click()
+                            time.sleep(0.5)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            time.sleep(random.uniform(1, 2))
+
+            if filled_count < 2:
+                return {
+                    "success": False,
+                    "status": "manual_needed",
+                    "reason": f"mercor_too_few_fields_filled:{filled_count}",
+                    "screenshots": [],
+                }
+
+            # Submit
+            submitted = False
+            for submit_text in ["Submit", "Apply", "Submit Application", "Send"]:
+                try:
+                    btn = self.page.locator(f'button:has-text("{submit_text}")').first
+                    if btn.is_visible(timeout=2000):
+                        time.sleep(random.uniform(1, 3))
+                        btn.click()
+                        time.sleep(random.uniform(3, 5))
+                        submitted = True
+                        logger.info(f"MercorHandler: clicked submit via '{submit_text}'")
+                        break
+                except Exception:
+                    continue
+
+            if submitted:
+                return {
+                    "success": True,
+                    "status": "applied",
+                    "reason": "mercor_submitted",
+                    "screenshots": [],
+                }
+            else:
+                return {
+                    "success": False,
+                    "status": "manual_needed",
+                    "reason": "mercor_no_submit_button",
+                    "screenshots": [],
+                }
+
+        except Exception as e:
+            logger.error(f"MercorHandler error: {e}")
+            return {
+                "success": False,
+                "status": "manual_needed",
+                "reason": f"mercor_error:{e}",
+                "screenshots": [],
+            }
+
+
+# ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
 
@@ -1135,6 +1268,7 @@ def route_to_handler(page: Page, profile: dict, resume_path: str, cover_letter_p
         "ashby": AshbyHandler,
         "greenhouse": GreenhouseHandler,
         "lever": LeverHandler,
+        "mercor": MercorHandler,
     }
 
     handler_class = handler_map.get(ats)
