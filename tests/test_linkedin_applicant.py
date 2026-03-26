@@ -84,19 +84,23 @@ class TestApplyToJob:
         mock_page = MagicMock()
         applicant.page = mock_page
 
-        # CAPTCHA check — no captcha present
-        captcha_locator = MagicMock()
-        captcha_locator.count.return_value = 0
-        captcha_locator.first.is_visible.return_value = False
-
         def locator_side_effect(selector):
             loc = MagicMock()
             if "captcha" in selector.lower():
                 loc.count.return_value = 0
                 loc.first.is_visible.return_value = False
                 return loc
+            # Scope containers: return count=0 so the scoped search skips them
+            # This forces fallback to unscoped search which also fails
+            loc.count.return_value = 0
             # All apply buttons: .first.is_visible() raises (timeout = not visible)
             loc.first.is_visible.side_effect = Exception("Timeout")
+            loc.first.inner_text.return_value = ""
+            # Chained .locator() calls should also fail visibility
+            child_loc = MagicMock()
+            child_loc.first.is_visible.side_effect = Exception("Timeout")
+            child_loc.first.inner_text.return_value = ""
+            loc.locator.return_value = child_loc
             return loc
 
         mock_page.locator.side_effect = locator_side_effect
@@ -286,6 +290,264 @@ class TestUploadResume:
 
         applicant._upload_resume(mock_page, str(resume_path))
         mock_file_input_element.set_input_files.assert_called_once_with(str(resume_path))
+
+
+class TestDialogDismissedRetry:
+    """Tests for dialog dismissed / instant submit detection improvements."""
+
+    def test_instant_submit_detected(self, applicant, sample_job, tmp_path):
+        """One-click Easy Apply that auto-submits should be detected."""
+        mock_page = MagicMock()
+        applicant.page = mock_page
+
+        # Easy Apply button
+        mock_easy_apply_btn = MagicMock()
+        mock_easy_apply_btn.is_visible.return_value = True
+        mock_easy_apply_btn.inner_text.return_value = "Easy Apply"
+
+        def locator_side_effect(selector):
+            loc = MagicMock()
+            if "captcha" in selector.lower():
+                loc.count.return_value = 0
+                loc.first.is_visible.return_value = False
+                return loc
+            if "Easy Apply" in selector:
+                loc.first = mock_easy_apply_btn
+                return loc
+            if "dialog" in selector or "artdeco-modal" in selector:
+                loc.count.return_value = 0  # No dialog appeared = instant submit
+                return loc
+            loc.first.is_visible.side_effect = Exception("Timeout")
+            loc.count.return_value = 0
+            return loc
+
+        mock_page.locator.side_effect = locator_side_effect
+
+        # Body text shows confirmation immediately
+        mock_page.evaluate.return_value = "Your application was sent to Acme Corp"
+
+        with patch.object(applicant, "_take_screenshot", return_value="/tmp/ss.png"), \
+             patch.object(applicant, "_handle_share_profile_dialog"):
+            result = applicant.apply_to_job(sample_job, str(tmp_path / "resume.docx"))
+
+        assert result["status"] == "applied"
+        assert result["success"] is True
+        assert "instant_submit" in result["reason"]
+
+    def test_instant_submit_delayed_confirmation(self, applicant, sample_job, tmp_path):
+        """No dialog + delayed confirmation text should still detect success."""
+        mock_page = MagicMock()
+        applicant.page = mock_page
+
+        mock_easy_apply_btn = MagicMock()
+        mock_easy_apply_btn.is_visible.return_value = True
+        mock_easy_apply_btn.inner_text.return_value = "Easy Apply"
+
+        def locator_side_effect(selector):
+            loc = MagicMock()
+            if "captcha" in selector.lower():
+                loc.count.return_value = 0
+                loc.first.is_visible.return_value = False
+                return loc
+            if "Easy Apply" in selector:
+                loc.first = mock_easy_apply_btn
+                return loc
+            if "dialog" in selector or "artdeco-modal" in selector:
+                loc.count.return_value = 0  # No dialog
+                return loc
+            loc.first.is_visible.side_effect = Exception("Timeout")
+            loc.count.return_value = 0
+            return loc
+
+        mock_page.locator.side_effect = locator_side_effect
+
+        # First evaluate: no confirmation; subsequent calls: confirmation appears
+        eval_calls = [0]
+
+        def evaluate_side_effect(script):
+            eval_calls[0] += 1
+            if eval_calls[0] <= 1:
+                return "loading page content"  # First call: no confirmation
+            return "your application was submitted successfully"
+
+        mock_page.evaluate.side_effect = evaluate_side_effect
+
+        with patch.object(applicant, "_take_screenshot", return_value="/tmp/ss.png"), \
+             patch.object(applicant, "_handle_share_profile_dialog"), \
+             patch("time.sleep"):  # Speed up test
+            result = applicant.apply_to_job(sample_job, str(tmp_path / "resume.docx"))
+
+        assert result["status"] == "applied"
+        assert result["success"] is True
+
+    def test_no_dialog_no_confirmation_fails(self, applicant, sample_job, tmp_path):
+        """No dialog and no confirmation text should return failure."""
+        mock_page = MagicMock()
+        applicant.page = mock_page
+
+        mock_easy_apply_btn = MagicMock()
+        mock_easy_apply_btn.is_visible.return_value = True
+        mock_easy_apply_btn.inner_text.return_value = "Easy Apply"
+
+        def locator_side_effect(selector):
+            loc = MagicMock()
+            if "captcha" in selector.lower():
+                loc.count.return_value = 0
+                loc.first.is_visible.return_value = False
+                return loc
+            if "Easy Apply" in selector:
+                loc.first = mock_easy_apply_btn
+                return loc
+            if "dialog" in selector or "artdeco-modal" in selector:
+                loc.count.return_value = 0  # No dialog
+                return loc
+            loc.first.is_visible.side_effect = Exception("Timeout")
+            loc.count.return_value = 0
+            return loc
+
+        mock_page.locator.side_effect = locator_side_effect
+
+        # Never returns confirmation text
+        mock_page.evaluate.return_value = "just some random page content"
+
+        with patch.object(applicant, "_take_screenshot", return_value="/tmp/ss.png"), \
+             patch.object(applicant, "_handle_share_profile_dialog"), \
+             patch("time.sleep"):  # Speed up test
+            result = applicant.apply_to_job(sample_job, str(tmp_path / "resume.docx"))
+
+        assert result["success"] is False
+        assert result["reason"] == "no_dialog_appeared"
+
+    def test_dialog_dismissed_with_expanded_confirmation(self, applicant, sample_job, tmp_path):
+        """Dialog disappears then 'you applied' text appears — should detect success."""
+        mock_page = MagicMock()
+        applicant.page = mock_page
+
+        mock_easy_apply_btn = MagicMock()
+        mock_easy_apply_btn.is_visible.return_value = True
+        mock_easy_apply_btn.inner_text.return_value = "Easy Apply"
+
+        dialog_visible = [True]
+        eval_calls = [0]
+
+        def locator_side_effect(selector):
+            loc = MagicMock()
+            if "captcha" in selector.lower():
+                loc.count.return_value = 0
+                loc.first.is_visible.return_value = False
+                return loc
+            if "Easy Apply" in selector:
+                loc.first = mock_easy_apply_btn
+                return loc
+            if "dialog" in selector or "artdeco-modal" in selector:
+                if dialog_visible[0]:
+                    loc.count.return_value = 1
+                    loc.first.text_content.return_value = "Step 1 form"
+                else:
+                    loc.count.return_value = 0
+                return loc
+            if "toast" in selector or "alert" in selector or "notification" in selector:
+                loc.count.return_value = 0
+                return loc
+            loc.first.is_visible.side_effect = Exception("Timeout")
+            loc.count.return_value = 0
+            loc.all.return_value = []
+            return loc
+
+        mock_page.locator.side_effect = locator_side_effect
+
+        def evaluate_side_effect(script):
+            eval_calls[0] += 1
+            if eval_calls[0] <= 3:
+                return "step 1 form content"
+            # After a few calls, dialog disappears and confirmation shows
+            dialog_visible[0] = False
+            if eval_calls[0] >= 5:
+                return "you applied to this job"
+            return "loading..."
+
+        mock_page.evaluate.side_effect = evaluate_side_effect
+
+        with patch.object(applicant, "_take_screenshot", return_value="/tmp/ss.png"), \
+             patch.object(applicant, "_handle_share_profile_dialog"), \
+             patch.object(applicant, "_has_submit_button", return_value=False), \
+             patch.object(applicant, "_fill_contact_info"), \
+             patch.object(applicant, "_handle_resume_step"), \
+             patch.object(applicant, "_handle_cover_letter_upload"), \
+             patch.object(applicant, "_answer_common_questions"), \
+             patch.object(applicant, "_click_next_or_continue"), \
+             patch("time.sleep"):
+            result = applicant.apply_to_job(sample_job, str(tmp_path / "resume.docx"))
+
+        assert result["status"] == "applied"
+        assert result["success"] is True
+
+    def test_dialog_dismissed_toast_notification_detected(self, applicant, sample_job, tmp_path):
+        """Dialog disappears and toast notification contains confirmation."""
+        mock_page = MagicMock()
+        applicant.page = mock_page
+
+        mock_easy_apply_btn = MagicMock()
+        mock_easy_apply_btn.is_visible.return_value = True
+        mock_easy_apply_btn.inner_text.return_value = "Easy Apply"
+
+        dialog_visible = [True]
+        eval_calls = [0]
+
+        def locator_side_effect(selector):
+            loc = MagicMock()
+            if "captcha" in selector.lower():
+                loc.count.return_value = 0
+                loc.first.is_visible.return_value = False
+                return loc
+            if "Easy Apply" in selector:
+                loc.first = mock_easy_apply_btn
+                return loc
+            if "dialog" in selector or "artdeco-modal" in selector:
+                if dialog_visible[0]:
+                    loc.count.return_value = 1
+                    loc.first.text_content.return_value = "Submit form"
+                else:
+                    loc.count.return_value = 0
+                return loc
+            if "toast" in selector or "alert" in selector or "notification" in selector:
+                if not dialog_visible[0]:
+                    # Toast appears after dialog disappears
+                    loc.count.return_value = 1
+                    loc.first.text_content.return_value = "Application was sent!"
+                else:
+                    loc.count.return_value = 0
+                return loc
+            loc.first.is_visible.side_effect = Exception("Timeout")
+            loc.count.return_value = 0
+            loc.all.return_value = []
+            return loc
+
+        mock_page.locator.side_effect = locator_side_effect
+
+        def evaluate_side_effect(script):
+            eval_calls[0] += 1
+            if eval_calls[0] <= 2:
+                return "form content step 1"
+            # Dialog disappears but body text doesn't have confirmation
+            dialog_visible[0] = False
+            return "job page content without confirmation keywords"
+
+        mock_page.evaluate.side_effect = evaluate_side_effect
+
+        with patch.object(applicant, "_take_screenshot", return_value="/tmp/ss.png"), \
+             patch.object(applicant, "_handle_share_profile_dialog"), \
+             patch.object(applicant, "_has_submit_button", return_value=False), \
+             patch.object(applicant, "_fill_contact_info"), \
+             patch.object(applicant, "_handle_resume_step"), \
+             patch.object(applicant, "_handle_cover_letter_upload"), \
+             patch.object(applicant, "_answer_common_questions"), \
+             patch.object(applicant, "_click_next_or_continue"), \
+             patch("time.sleep"):
+            result = applicant.apply_to_job(sample_job, str(tmp_path / "resume.docx"))
+
+        assert result["status"] == "applied"
+        assert result["success"] is True
 
 
 class TestClose:

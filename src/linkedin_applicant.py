@@ -280,6 +280,60 @@ class LinkedInApplicant:
             # Handle "Share your profile?" consent dialog
             self._handle_share_profile_dialog(self.page)
 
+            # Check for instant one-click submission (some Easy Apply jobs auto-submit)
+            time.sleep(2)
+            try:
+                instant_text = self.page.evaluate("() => document.body.innerText").lower()
+                confirmation_patterns = [
+                    "application was sent",
+                    "application submitted",
+                    "your application was submitted",
+                    "you applied",
+                ]
+                if any(p in instant_text for p in confirmation_patterns):
+                    self._take_screenshot(self.page, job, output_dir, "instant_submit")
+                    logger.info(f"Instant one-click apply confirmed for {role} at {company}")
+                    return {
+                        "success": True,
+                        "status": "applied",
+                        "reason": "easy_apply_instant_submit",
+                        "screenshots": list(self.screenshots),
+                    }
+            except Exception:
+                pass
+
+            # Also check if dialog even opened — if no dialog, might have been instant
+            try:
+                dialog = self.page.locator('div[role="dialog"], .artdeco-modal')
+                if dialog.count() == 0:
+                    # No dialog appeared — check for confirmation with longer wait
+                    for _ in range(4):
+                        time.sleep(2)
+                        try:
+                            body_text = self.page.evaluate("() => document.body.innerText").lower()
+                            if any(p in body_text for p in confirmation_patterns):
+                                self._take_screenshot(self.page, job, output_dir, "instant_submit_delayed")
+                                logger.info(f"Delayed instant submit confirmation for {role} at {company}")
+                                return {
+                                    "success": True,
+                                    "status": "applied",
+                                    "reason": "easy_apply_instant_submit_delayed",
+                                    "screenshots": list(self.screenshots),
+                                }
+                        except Exception:
+                            pass
+                    # No dialog AND no confirmation — something went wrong
+                    self._take_screenshot(self.page, job, output_dir, "no_dialog_no_confirm")
+                    logger.warning(f"No dialog appeared and no confirmation for {role} at {company}")
+                    return {
+                        "success": False,
+                        "status": "apply_failed",
+                        "reason": "no_dialog_appeared",
+                        "screenshots": list(self.screenshots),
+                    }
+            except Exception:
+                pass
+
             # Multi-step form handling loop
             max_steps = 15
             prev_page_text = ""
@@ -292,7 +346,12 @@ class LinkedInApplicant:
                 # Check for submission confirmation (dialog may have closed)
                 try:
                     page_text = self.page.evaluate("() => document.body.innerText").lower()
-                    if "application was sent" in page_text or "application submitted" in page_text:
+                    if any(p in page_text for p in [
+                        "application was sent",
+                        "application submitted",
+                        "your application was submitted",
+                        "you applied",
+                    ]):
                         self._take_screenshot(self.page, job, output_dir, "confirmed_submit")
                         logger.info(f"Application confirmed submitted for {role} at {company}")
                         return {
@@ -311,13 +370,34 @@ class LinkedInApplicant:
                         # Dialog gone — wait and retry for confirmation text
                         # LinkedIn sometimes takes a moment to show "application was sent"
                         confirmed = False
-                        for wait_attempt in range(5):
+                        confirmation_patterns = [
+                            "application was sent",
+                            "application submitted",
+                            "your application was submitted",
+                            "you applied",
+                            "applied to",
+                        ]
+                        # Wait up to 15s (10 attempts × 1.5s) for confirmation
+                        for wait_attempt in range(10):
                             time.sleep(1.5)
                             try:
                                 body_text = self.page.evaluate("() => document.body.innerText").lower()
-                                if "application was sent" in body_text or "application submitted" in body_text or "your application was submitted" in body_text:
+                                if any(p in body_text for p in confirmation_patterns):
                                     confirmed = True
                                     break
+                            except Exception:
+                                pass
+                            # Check for toast/notification elements too
+                            try:
+                                toast = self.page.locator(
+                                    '.artdeco-toast-item, .artdeco-notification, '
+                                    '[role="alert"], .msg-overlay-bubble'
+                                )
+                                if toast.count() > 0:
+                                    toast_text = toast.first.text_content().lower()
+                                    if any(p in toast_text for p in confirmation_patterns):
+                                        confirmed = True
+                                        break
                             except Exception:
                                 pass
                             # Also check if dialog reappeared
