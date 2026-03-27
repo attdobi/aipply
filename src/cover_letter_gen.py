@@ -1,7 +1,7 @@
 """Cover letter generation module.
 
 Creates a clean .docx cover letter matching the template's tone and formatting.
-No API calls — the caller provides the letter text directly.
+Uses LLM generation with template fallback.
 """
 
 import logging
@@ -16,6 +16,9 @@ from src.utils import ensure_dir, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
+# Module-level cache
+_cover_letter_cache = {}
+
 
 class CoverLetterGenerator:
     """Generates a .docx cover letter from provided text."""
@@ -24,9 +27,10 @@ class CoverLetterGenerator:
         self.config = config or {}
 
     @staticmethod
-    def generate_text(company: str, title: str, description: str) -> str:
-        """Generate tailored cover letter text."""
+    def _generate_template_text(company: str, title: str, description: str) -> str:
+        """Original template-based cover letter generation (fallback)."""
         from datetime import datetime
+        import re
 
         # Clean title: remove LinkedIn artifacts (doubled text, "with verification", etc.)
         title = title.split("\n")[0].strip()
@@ -44,7 +48,6 @@ class CoverLetterGenerator:
             if sep in title:
                 title = title.split(sep)[0].strip()
         # Remove redundant trailing "Position"/"Role"/"Job" (avoids "...Position position at")
-        import re
         title = re.sub(r'\s+(position|role|job)\s*$', '', title, flags=re.IGNORECASE)
 
         desc_lower = description.lower()
@@ -108,6 +111,67 @@ Thank you for your time.
 Best regards,"""
 
         return letter
+
+    @staticmethod
+    def generate_text(company: str, title: str, description: str) -> str:
+        """Generate tailored cover letter text using LLM with template fallback."""
+        # 1. Check cache
+        cache_key = f"{company}|{title}"
+        if cache_key in _cover_letter_cache:
+            logger.info("Cover letter cache hit: %s", cache_key)
+            return _cover_letter_cache[cache_key]
+
+        # 2. Try LLM
+        try:
+            from src.resume_tailor import ResumeTailor
+            from src.llm_client import generate_text as llm_generate
+            from src.deslop import clean_text
+
+            resume_text = ResumeTailor.read_resume_text("templates/base_resume.docx")
+            tone_reference = CoverLetterGenerator.read_example()
+
+            system_prompt = f"""You write cover letters for Danna Dobi, a compliance professional applying for jobs.
+
+Rules:
+- Max 4 paragraphs, 250-300 words total
+- First paragraph: state the role and reference something specific about the company from the job description
+- Middle paragraphs: connect Danna's actual experience to what the JD asks for. Use specific examples from her background at OCC (federal bank examiner), Cross River Bank (compliance/operational risk audits), and Prime Trust (audit and compliance monitoring)
+- Last paragraph: short, confident close. No begging or desperation
+- Mention CFE and CAMS certifications naturally within sentences, not as a list
+- Sign off with "Best regards," only (no name after it)
+- Write like a competent professional, not an AI. No "I'm thrilled", "leverage", "I'm excited to bring my expertise", "passionate about", "unique opportunity", or similar slop
+- Use the tone reference below as a style guide — match its directness and confidence level
+
+TONE REFERENCE:
+{tone_reference}"""
+
+            user_prompt = f"""Write a cover letter for this position:
+
+Company: {company}
+Role: {title}
+
+Job Description:
+{description[:3000]}
+
+Danna's Background:
+{resume_text[:2000]}"""
+
+            result = llm_generate(system_prompt, user_prompt, max_tokens=800, temperature=0.7)
+
+            if result:
+                result = clean_text(result)
+                _cover_letter_cache[cache_key] = result
+                logger.info("Generated AI cover letter for %s at %s", title, company)
+                return result
+
+        except Exception as e:
+            logger.warning("LLM cover letter generation failed: %s", e)
+
+        # 3. Fallback to template
+        logger.info("Falling back to template cover letter for %s at %s", title, company)
+        text = CoverLetterGenerator._generate_template_text(company, title, description)
+        _cover_letter_cache[cache_key] = text
+        return text
 
     @staticmethod
     def read_example(path: str | Path = "templates/base_cover_letter.docx") -> str:

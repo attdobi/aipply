@@ -278,3 +278,74 @@ class TestTailorAndSave:
         )
         assert Path(result).exists()
         assert output_dir.exists()
+
+
+from unittest.mock import patch, MagicMock
+
+
+class TestTailorSummaryAI:
+    """Tests for AI-powered resume summary generation."""
+
+    def test_generates_with_llm(self):
+        """tailor_summary should use LLM when available."""
+        with patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="Danna's resume text"), \
+             patch("src.llm_client.generate_text", return_value="AI-generated professional summary for compliance role.") as mock_llm:
+            result = ResumeTailor.tailor_summary("Acme Corp", "Compliance Analyst", "Looking for AML expert")
+            assert "AI-generated professional summary" in result
+            mock_llm.assert_called_once()
+
+    def test_falls_back_to_template_on_empty_result(self):
+        """tailor_summary should fall back to template when LLM returns empty."""
+        with patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume"), \
+             patch("src.llm_client.generate_text", return_value=""):
+            result = ResumeTailor.tailor_summary("Acme Corp", "Compliance Analyst", "AML BSA compliance")
+            # Template fallback should produce text with OCC mention
+            assert "OCC" in result or "Comptroller" in result
+
+    def test_falls_back_to_template_on_exception(self):
+        """tailor_summary should fall back to template when LLM raises exception."""
+        with patch("src.llm_client.generate_text", side_effect=Exception("API down")), \
+             patch("src.resume_tailor.ResumeTailor.read_resume_text", side_effect=Exception("file error")):
+            result = ResumeTailor.tailor_summary("TestCo", "Risk Analyst", "Risk management role with audit")
+            # Should still produce a summary via template
+            assert "Compliance professional" in result or "compliance" in result.lower()
+
+    def test_deslop_applied_to_llm_output(self):
+        """LLM output should be run through deslop clean_text."""
+        with patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume"), \
+             patch("src.llm_client.generate_text", return_value="I'm excited to leverage my extensive experience"):
+            result = ResumeTailor.tailor_summary("DeSlopCo", "Role", "desc")
+            assert "leverage" not in result
+
+
+class TestTailorSummaryTemplate:
+    """Tests for the template-based summary fallback (existing behavior preserved)."""
+
+    def test_template_aml_theme(self):
+        """Template should use AML/BSA theme for relevant JDs."""
+        result = ResumeTailor._tailor_summary_template(
+            "FinBank", "AML Analyst", "BSA AML anti-money laundering compliance"
+        )
+        assert "BSA/AML" in result
+
+    def test_template_risk_theme(self):
+        """Template should use risk theme for risk-focused JDs."""
+        result = ResumeTailor._tailor_summary_template(
+            "RiskCo", "Risk Manager", "risk assessment risk management enterprise risk"
+        )
+        assert "risk assessment" in result
+
+    def test_template_fintech_theme(self):
+        """Template should use fintech theme for fintech JDs."""
+        result = ResumeTailor._tailor_summary_template(
+            "FinTechCo", "Compliance Lead", "fintech digital banking regulatory"
+        )
+        assert "fintech" in result.lower()
+
+    def test_template_default_theme(self):
+        """Template should use default theme when no keywords match."""
+        result = ResumeTailor._tailor_summary_template(
+            "GenericCo", "Associate", "General office work"
+        )
+        assert "compliance" in result.lower()
+        assert "OCC" in result or "Comptroller" in result

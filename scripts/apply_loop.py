@@ -45,6 +45,9 @@ import src.job_filter as _job_filter_mod
 from src.job_filter import filter_job, is_relevant_title
 from src.utils import ensure_dir, sanitize_filename
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # Config
 STOP_FILE = PROJECT_ROOT / ".stop"
 TRACKER_PATH = PROJECT_ROOT / "output" / "tracker.json"
