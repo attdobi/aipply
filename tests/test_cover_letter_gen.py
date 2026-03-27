@@ -252,3 +252,126 @@ class TestGenerateAndSave:
         )
         assert Path(result).exists()
         assert output_dir.exists()
+
+
+from unittest.mock import patch, MagicMock
+
+
+class TestGenerateTextAI:
+    """Tests for AI-powered cover letter generation."""
+
+    def test_generates_with_llm(self):
+        """generate_text should use LLM when available."""
+        with patch("src.cover_letter_gen.CoverLetterGenerator.read_example", return_value="tone ref"), \
+             patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume text"), \
+             patch("src.llm_client.generate_text", return_value="AI generated cover letter text.\n\nBest regards,") as mock_llm:
+            # Clear cache before test
+            import src.cover_letter_gen as cl_mod
+            cl_mod._cover_letter_cache.clear()
+
+            result = CoverLetterGenerator.generate_text("Acme Corp", "Compliance Analyst", "Looking for AML expert")
+            assert "AI generated cover letter" in result
+            mock_llm.assert_called_once()
+
+    def test_falls_back_to_template_on_llm_failure(self):
+        """generate_text should fall back to template when LLM returns empty string."""
+        with patch("src.cover_letter_gen.CoverLetterGenerator.read_example", return_value="tone ref"), \
+             patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume text"), \
+             patch("src.llm_client.generate_text", return_value=""):
+            import src.cover_letter_gen as cl_mod
+            cl_mod._cover_letter_cache.clear()
+
+            result = CoverLetterGenerator.generate_text("Acme Corp", "Compliance Analyst", "Looking for AML expert")
+            # Should contain template-generated content (OCC, Best regards, etc.)
+            assert "OCC" in result
+            assert "Best regards," in result
+
+    def test_falls_back_to_template_on_exception(self):
+        """generate_text should fall back to template when LLM raises an exception."""
+        with patch("src.llm_client.generate_text", side_effect=Exception("API error")), \
+             patch("src.cover_letter_gen.CoverLetterGenerator.read_example", side_effect=Exception("read failed")):
+            import src.cover_letter_gen as cl_mod
+            cl_mod._cover_letter_cache.clear()
+
+            result = CoverLetterGenerator.generate_text("TestCo", "Risk Analyst", "Risk management role")
+            # Should still produce a cover letter via template
+            assert "Best regards," in result
+            assert "TestCo" in result
+
+    def test_cache_returns_same_result(self):
+        """generate_text should cache results by company+title."""
+        with patch("src.cover_letter_gen.CoverLetterGenerator.read_example", return_value="tone ref"), \
+             patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume text"), \
+             patch("src.llm_client.generate_text", return_value="Cached letter content.\n\nBest regards,") as mock_llm:
+            import src.cover_letter_gen as cl_mod
+            cl_mod._cover_letter_cache.clear()
+
+            result1 = CoverLetterGenerator.generate_text("CacheCo", "Analyst", "desc")
+            result2 = CoverLetterGenerator.generate_text("CacheCo", "Analyst", "different desc")
+            assert result1 == result2
+            # LLM should only be called once
+            mock_llm.assert_called_once()
+
+    def test_cache_different_keys(self):
+        """Different company+title combos should not share cache."""
+        with patch("src.cover_letter_gen.CoverLetterGenerator.read_example", return_value="tone ref"), \
+             patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume text"), \
+             patch("src.llm_client.generate_text", side_effect=["Letter A", "Letter B"]):
+            import src.cover_letter_gen as cl_mod
+            cl_mod._cover_letter_cache.clear()
+
+            result1 = CoverLetterGenerator.generate_text("CompanyA", "Role1", "desc")
+            result2 = CoverLetterGenerator.generate_text("CompanyB", "Role2", "desc")
+            assert result1 != result2
+
+    def test_deslop_applied_to_llm_output(self):
+        """LLM output should be run through deslop clean_text."""
+        with patch("src.cover_letter_gen.CoverLetterGenerator.read_example", return_value="tone ref"), \
+             patch("src.resume_tailor.ResumeTailor.read_resume_text", return_value="resume text"), \
+             patch("src.llm_client.generate_text", return_value="I'm thrilled to leverage my skills"):
+            import src.cover_letter_gen as cl_mod
+            cl_mod._cover_letter_cache.clear()
+
+            result = CoverLetterGenerator.generate_text("DeSlopCo", "Role", "desc")
+            # deslop should have cleaned these
+            assert "thrilled" not in result
+            assert "leverage" not in result
+
+
+class TestGenerateTextTemplate:
+    """Tests for the template-based fallback (existing behavior preserved)."""
+
+    def test_template_includes_company_and_title(self):
+        """Template should reference the company and cleaned title."""
+        import src.cover_letter_gen as cl_mod
+        result = CoverLetterGenerator._generate_template_text(
+            "BigBank", "Senior Compliance Officer", "AML compliance role"
+        )
+        assert "BigBank" in result
+        assert "Senior Compliance Officer" in result
+
+    def test_template_aml_highlights(self):
+        """Template should pick AML-related highlights from description."""
+        import src.cover_letter_gen as cl_mod
+        result = CoverLetterGenerator._generate_template_text(
+            "FinCo", "Analyst", "We need someone with AML and BSA experience"
+        )
+        assert "BSA/AML" in result
+
+    def test_template_default_highlights(self):
+        """Template should use default highlights when no keywords match."""
+        import src.cover_letter_gen as cl_mod
+        result = CoverLetterGenerator._generate_template_text(
+            "GenericCo", "Associate", "General office work"
+        )
+        assert "Best regards," in result
+
+    def test_template_deduplicates_title(self):
+        """Template should handle doubled titles like 'Risk Analyst Risk Analyst'."""
+        import src.cover_letter_gen as cl_mod
+        result = CoverLetterGenerator._generate_template_text(
+            "Co", "Risk Analyst Risk Analyst", "desc"
+        )
+        # Should only appear once in the letter body
+        assert "Risk Analyst Risk Analyst" not in result
+        assert "Risk Analyst" in result
