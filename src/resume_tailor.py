@@ -1,8 +1,7 @@
 """Resume tailoring module.
 
 Clones the original .docx and surgically replaces the Professional Summary
-and reorders Core Competencies. No API calls — the caller provides the
-tailored text directly.
+and reorders Core Competencies. Uses LLM generation with template fallback.
 """
 
 import logging
@@ -82,8 +81,8 @@ class ResumeTailor:
         return output_path
 
     @staticmethod
-    def tailor_summary(company: str, title: str, description: str) -> str:
-        """Generate tailored professional summary based on JD keywords."""
+    def _tailor_summary_template(company: str, title: str, description: str) -> str:
+        """Original template-based summary generation (fallback)."""
         desc_lower = description.lower()
 
         themes = []
@@ -151,6 +150,49 @@ class ResumeTailor:
         )
 
         return base + middle + closing
+
+    @staticmethod
+    def tailor_summary(company: str, title: str, description: str) -> str:
+        """Generate tailored professional summary using LLM with template fallback."""
+        try:
+            from src.llm_client import generate_text as llm_generate
+            from src.deslop import clean_text
+
+            resume_text = ResumeTailor.read_resume_text("templates/base_resume.docx")
+
+            system_prompt = """You write professional summaries for Danna Dobi's resume, a compliance professional.
+
+Rules:
+- Write exactly 3-4 sentences
+- Emphasize the aspects of her background most relevant to the specific job description
+- Use ONLY facts from her actual resume — do not invent experience she doesn't have
+- Mention specific employers (OCC, Cross River Bank, Prime Trust) where relevant
+- No AI slop: no "passionate", "leverage", "thrilled", "excited", "dynamic"
+- Direct, confident, professional tone"""
+
+            user_prompt = f"""Write a professional summary for this job application:
+
+Company: {company}
+Role: {title}
+
+Job Description:
+{description[:3000]}
+
+Danna's Actual Background:
+{resume_text[:2000]}"""
+
+            result = llm_generate(system_prompt, user_prompt, max_tokens=300, temperature=0.7)
+
+            if result:
+                result = clean_text(result)
+                logger.info("Generated AI resume summary for %s at %s", title, company)
+                return result
+
+        except Exception as e:
+            logger.warning("LLM resume summary generation failed: %s", e)
+
+        logger.info("Falling back to template summary for %s at %s", title, company)
+        return ResumeTailor._tailor_summary_template(company, title, description)
 
     @staticmethod
     def tailor_competencies(description: str) -> list[str]:
