@@ -6,6 +6,7 @@ Handles submitting LinkedIn Easy Apply applications via browser automation.
 import logging
 import os
 import random
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,15 @@ from playwright.sync_api import sync_playwright, Page, Browser
 from src.utils import ensure_dir, sanitize_filename
 
 logger = logging.getLogger(__name__)
+
+# Patterns that indicate LinkedIn has confirmed the application was submitted
+CONFIRMATION_PATTERNS = [
+    "application was sent",
+    "application submitted",
+    "your application was submitted",
+    "you applied",
+    "applied to",
+]
 
 
 class LinkedInApplicant:
@@ -118,7 +128,6 @@ class LinkedInApplicant:
             output_dir = Path("output") / "applications" / f"{safe_company}_{safe_role}_{date_str}"
 
             # Convert search URLs to direct job view URLs for reliable navigation
-            import re
             job_id_match = re.search(r'currentJobId=(\d+)', job_url) or re.search(r'/jobs/view/(\d+)', job_url)
             if job_id_match:
                 direct_url = f"https://www.linkedin.com/jobs/view/{job_id_match.group(1)}/"
@@ -284,13 +293,7 @@ class LinkedInApplicant:
             time.sleep(2)
             try:
                 instant_text = self.page.evaluate("() => document.body.innerText").lower()
-                confirmation_patterns = [
-                    "application was sent",
-                    "application submitted",
-                    "your application was submitted",
-                    "you applied",
-                ]
-                if any(p in instant_text for p in confirmation_patterns):
+                if any(p in instant_text for p in CONFIRMATION_PATTERNS):
                     self._take_screenshot(self.page, job, output_dir, "instant_submit")
                     logger.info(f"Instant one-click apply confirmed for {role} at {company}")
                     return {
@@ -311,7 +314,7 @@ class LinkedInApplicant:
                         time.sleep(2)
                         try:
                             body_text = self.page.evaluate("() => document.body.innerText").lower()
-                            if any(p in body_text for p in confirmation_patterns):
+                            if any(p in body_text for p in CONFIRMATION_PATTERNS):
                                 self._take_screenshot(self.page, job, output_dir, "instant_submit_delayed")
                                 logger.info(f"Delayed instant submit confirmation for {role} at {company}")
                                 return {
@@ -346,12 +349,7 @@ class LinkedInApplicant:
                 # Check for submission confirmation (dialog may have closed)
                 try:
                     page_text = self.page.evaluate("() => document.body.innerText").lower()
-                    if any(p in page_text for p in [
-                        "application was sent",
-                        "application submitted",
-                        "your application was submitted",
-                        "you applied",
-                    ]):
+                    if any(p in page_text for p in CONFIRMATION_PATTERNS):
                         self._take_screenshot(self.page, job, output_dir, "confirmed_submit")
                         logger.info(f"Application confirmed submitted for {role} at {company}")
                         return {
@@ -370,19 +368,12 @@ class LinkedInApplicant:
                         # Dialog gone — wait and retry for confirmation text
                         # LinkedIn sometimes takes a moment to show "application was sent"
                         confirmed = False
-                        confirmation_patterns = [
-                            "application was sent",
-                            "application submitted",
-                            "your application was submitted",
-                            "you applied",
-                            "applied to",
-                        ]
                         # Wait up to 15s (10 attempts × 1.5s) for confirmation
                         for wait_attempt in range(10):
                             time.sleep(1.5)
                             try:
                                 body_text = self.page.evaluate("() => document.body.innerText").lower()
-                                if any(p in body_text for p in confirmation_patterns):
+                                if any(p in body_text for p in CONFIRMATION_PATTERNS):
                                     confirmed = True
                                     break
                             except Exception:
@@ -395,7 +386,7 @@ class LinkedInApplicant:
                                 )
                                 if toast.count() > 0:
                                     toast_text = toast.first.text_content().lower()
-                                    if any(p in toast_text for p in confirmation_patterns):
+                                    if any(p in toast_text for p in CONFIRMATION_PATTERNS):
                                         confirmed = True
                                         break
                             except Exception:

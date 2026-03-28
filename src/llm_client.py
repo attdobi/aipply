@@ -30,7 +30,7 @@ def generate_text(system_prompt: str, user_prompt: str, max_tokens: int = 1000,
     (callers fall back to templates).
     """
     client = _get_client()
-    model = "gpt-4o"
+    model = os.getenv("OPENAI_MODEL", "gpt-4o")
 
     for attempt in range(2):  # 1 initial + 1 retry
         try:

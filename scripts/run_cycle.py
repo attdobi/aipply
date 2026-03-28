@@ -19,6 +19,7 @@ from src.linkedin_applicant import LinkedInApplicant
 from src.resume_tailor import ResumeTailor
 from src.cover_letter_gen import CoverLetterGenerator
 from src.tracker import ApplicationTracker
+from src.deslop import clean_docx
 from src.utils import load_config, ensure_dir, sanitize_filename, get_timestamp
 
 logger = logging.getLogger("aipply")
@@ -203,9 +204,12 @@ def run_cycle(args=None):
             try:
                 # A. Tailor resume
                 logger.info("  Tailoring resume...")
+                new_summary = ResumeTailor.tailor_summary(company, role, description)
+                new_competencies = ResumeTailor.tailor_competencies(description)
                 resume_path = tailor.tailor_and_save(
                     base_resume_path=base_resume,
-                    job_description=description,
+                    new_summary=new_summary,
+                    new_competencies=new_competencies,
                     company=company,
                     role=role,
                     output_dir=job_dir,
@@ -214,13 +218,13 @@ def run_cycle(args=None):
 
                 # B. Generate cover letter
                 logger.info("  Generating cover letter...")
+                cl_text = CoverLetterGenerator.generate_text(company, role, description)
                 cl_path = cover_gen.generate_and_save(
-                    job_description=description,
+                    text=cl_text,
                     candidate_profile=candidate,
                     company=company,
                     role=role,
                     output_dir=job_dir,
-                    example_letter_path=example_cover_letter,
                 )
                 logger.info(f"  Cover letter saved: {cl_path}")
 

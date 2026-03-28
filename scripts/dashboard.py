@@ -532,7 +532,9 @@ def index():
 
 @app.route("/download/<path:filepath>")
 def download(filepath):
-    full = ROOT / filepath
+    full = (ROOT / filepath).resolve()
+    if not str(full).startswith(str(ROOT.resolve())):
+        abort(403)
     if full.exists() and full.is_file():
         return send_file(str(full), as_attachment=True)
     abort(404)
@@ -540,7 +542,9 @@ def download(filepath):
 
 @app.route("/view/<path:filepath>")
 def view(filepath):
-    full = ROOT / filepath
+    full = (ROOT / filepath).resolve()
+    if not str(full).startswith(str(ROOT.resolve())):
+        abort(403)
     if full.exists() and full.suffix == ".txt":
         text = full.read_text()
         return f"""<!DOCTYPE html>
@@ -566,7 +570,9 @@ h2 {{ margin-bottom: 1rem; }}
 @app.route("/preview/<path:filepath>")
 def preview(filepath):
     """Preview .docx files — extract formatted HTML via python-docx."""
-    full = ROOT / filepath
+    full = (ROOT / filepath).resolve()
+    if not str(full).startswith(str(ROOT.resolve())):
+        abort(403)
     if not full.exists() or full.suffix != ".docx":
         abort(404)
 

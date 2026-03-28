@@ -274,7 +274,7 @@ class LinkedInScanner:
 
             # Check if new content loaded after scroll
             self._page.wait_for_timeout(1500)
-            return True  # Assume infinite scroll loaded more
+            return False  # No explicit load-more trigger found
         except Exception as exc:
             logger.debug("Load-more failed: %s", exc)
             return False
