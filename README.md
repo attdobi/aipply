@@ -31,24 +31,40 @@ Aipply (AI + Apply) is an automated system that scans LinkedIn for job postings,
 aipply/
 ├── config/
 │   ├── settings.yaml          # Search criteria, exclusions, schedule
-│   └── profile.yaml           # Candidate profile and strengths
+│   └── profile.yaml           # Candidate profile, EEO, work auth
+├── docs/
+│   └── apply-agent/
+│       ├── SPEC.md            # Safe-first architecture and phases
+│       ├── SAFETY.md          # Hard constraints for shadow/live behavior
+│       └── POLICY.md          # Filtering policy direction
 ├── templates/
 │   ├── base_resume.docx       # Your base resume (not tracked in git)
 │   └── base_cover_letter.docx # Your base cover letter (not tracked in git)
 ├── src/
 │   ├── __init__.py
-│   ├── linkedin_scanner.py    # Job search and filtering
-│   ├── linkedin_applicant.py  # Application submission
-│   ├── resume_tailor.py       # AI-powered resume customization
+│   ├── apply_policy.py        # Deterministic policy scaffolding
+│   ├── apply_safety.py        # Live submission safety guards
+│   ├── ats_handlers.py        # ATS-specific handlers (Ashby, Greenhouse, Lever, Mercor)
 │   ├── cover_letter_gen.py    # AI-powered cover letter generation
+│   ├── deslop.py              # De-slop filter for AI-generated text
+│   ├── job_filter.py          # Job title/company relevance filtering
+│   ├── linkedin_applicant.py  # LinkedIn Easy Apply + external application submission
+│   ├── linkedin_scanner.py    # Job search and filtering
+│   ├── llm_client.py          # Shared OpenAI API client
+│   ├── resume_tailor.py       # AI-powered resume customization
+│   ├── tracker.py             # Application tracking and reporting
 │   └── utils.py               # Shared utilities
 ├── scripts/
+│   ├── apply_loop.py          # Continuous apply loop
+│   ├── cycle_run.py           # One-shot cycle (single keyword)
+│   ├── dashboard.py           # Flask dashboard with live controls
+│   ├── quick_cycle.py         # Quick single-keyword cycle
 │   └── run_cycle.py           # Main entry point
+├── tests/                     # Pytest test suite
 ├── output/
 │   ├── applications/          # Tailored resumes and cover letters per job
-│   ├── reports/               # HTML/XLSX tracking reports
+│   ├── reports/               # HTML tracking reports
 │   └── tracker.json           # Application history
-├── tests/
 ├── requirements.txt
 ├── .gitignore
 └── README.md
